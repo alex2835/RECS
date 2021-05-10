@@ -5,17 +5,17 @@
 #include <vector>
 #include <algorithm>
 
+#include "recs_types.hpp"
 #include "entity.hpp"
 
 namespace recs
 {
    /**
-    * @brief Contain components data
+    * @brief Store components data
     */
    class Pool
    {
    public:
-
       template <typename T>
       static Pool MakePool()
       {
@@ -27,16 +27,15 @@ namespace recs
       Pool& operator=(Pool&&) = default;
 
       template <typename T, typename ...Args>
-      T& Push(Entity entity, T&& component, Args&& ...args)
+      T& Push(Entity entity, Args&& ...args)
       {
          if (mCapacity <= mSize + 1)
             Realoc(2 * mSize + 1);
 
-         void* new_elem = GetAddress(mSize + 1);
+         void* new_elem = GetElemAddress(mSize + 1);
          
          mEntities.push_back(entity);
-         //memmove(new_elem, data, mComponentSize);
-         new(new_elem) T(std::forward<...Args>(args...));
+         new(new_elem) T(std::forward<Args>(args)...);
 
          mSize++;
          return *static_cast<T*>(new_elem);
@@ -47,13 +46,22 @@ namespace recs
          
       }
 
-      void* Get(Entity entity)
+      template <typename T>
+      OptRef<T> Get(Entity entity)
+      {
+         void* raw_data = GetRaw(entity);
+         if (raw_data)
+            return *static_cast<T*>(raw_data);
+         return std::nullopt;
+      }
+
+      void* GetRaw(Entity entity)
       {
          auto iterator = std::find(mEntities.begin(), mEntities.end(), entity);
          if (iterator != mEntities.end())
          {
             uint32_t position = iterator - mEntities.begin();
-            return GetAddress(position);
+            return GetElemAddress(position);
          }
          return nullptr;
       }
@@ -82,7 +90,7 @@ namespace recs
          }
       }
 
-      void* GetAddress(uint32_t size)
+      void* GetElemAddress(uint32_t size)
       {
          return &mData[mComponentSize * size];
       }
