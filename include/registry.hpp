@@ -2,6 +2,7 @@
 #include <unordered_map>
 #include <string_view>
 #include <string>
+#include <tuple>
 
 #include "recs_types.hpp"
 #include "entity.hpp"
@@ -36,8 +37,12 @@ namespace recs
 
       void RemoveComponet(Entity entity, std::string_view component_name) {}
 
+      /**
+       * @brief Return componet ref
+       * @throw If no such component or if entity is invalid 
+       */
       template <typename T>
-      OptRef<T> GetComponent(Entity entity, std::string_view component_name)
+      T& GetComponent(Entity entity, std::string_view component_name)
       {
          if (entity == iNVALID_ENTITY)
             throw std::runtime_error("Get component: invalid entity");
@@ -48,13 +53,28 @@ namespace recs
             Pool& pool = GetComponentPool(component_type);
             return pool.Get<T>(entity);
          }
-         return std::nullopt;
+         throw std::runtime_error("Entity doesn't have such a component");
+      }
+
+      /**
+       * @brief Return componets ref
+       * @throw If no such component or if entity is invalid 
+       */
+      template <typename ...Args, int Size>
+      std::tuple<Args&...> GetComponents(Entity entity, const std::string_view(&component_names)[Size])
+      {
+         if (entity == iNVALID_ENTITY)
+            throw std::runtime_error("Get component: invalid entity");
+ 
+         static_assert(sizeof...(Args) == Size, "Components names and template arguments are not equal");
+
+         return GetComponentsImpl<Args...>(entity, as_tuple(component_names), std::make_index_sequence<Size>{});
       }
 
       bool HasComponent(Entity entity, std::string_view component_name)
       {
          if (entity == iNVALID_ENTITY)
-            throw std::runtime_error("Has component: invalid entity");
+            throw std::runtime_error("Has component: invalid entity"); 
             
          auto component = mMetaData.CheckComponentPoolName(component_name);
          return mMetaData.HasComponent(entity, component);
@@ -67,6 +87,12 @@ namespace recs
       const auto& GetComponentPools() { return mComponentPools; };
 
    private:
+      template <typename ...Args, typename Tuple, size_t... Is>
+      std::tuple<Args&...> GetComponentsImpl(Entity entity, Tuple tuple, std::index_sequence<Is...>)
+      {
+         return std::forward_as_tuple(GetComponent<Args>(entity, std::get<Is>(tuple))...);
+      }
+
       Pool& GetComponentPool(ComponentTypeID id)
       {
          auto iterator = std::find_if(mComponentPools.begin(), mComponentPools.end(), 

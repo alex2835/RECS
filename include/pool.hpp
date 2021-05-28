@@ -32,13 +32,13 @@ namespace recs
          if (mCapacity <= mSize + 1)
             Realoc(2 * mSize + 1);
 
-         void* new_elem = GetElemAddress(mSize + 1);
+         void* new_elem_mem = GetElemAddress(mSize);
          
          mEntities.push_back(entity);
-         new(new_elem) T(std::forward<Args>(args)...);
+         new(new_elem_mem) T(std::forward<Args>(args)...);
 
          mSize++;
-         return *static_cast<T*>(new_elem);
+         return *static_cast<T*>(new_elem_mem);
       }
 
       void Remove(Entity entity)
@@ -47,12 +47,12 @@ namespace recs
       }
 
       template <typename T>
-      OptRef<T> Get(Entity entity)
+      T& Get(Entity entity)
       {
          void* raw_data = GetRaw(entity);
          if (raw_data)
             return *static_cast<T*>(raw_data);
-         return std::nullopt;
+         throw std::runtime_error("Entity has component, but pool doesn't (Incorrent working)");
       }
 
       void* GetRaw(Entity entity)
