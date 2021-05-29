@@ -20,6 +20,25 @@ namespace recs
       bool operator == (Entity other) const { return mID == other.mID; }
       bool operator <  (Entity other) const { return mID <  other.mID; }
 
+   template <typename T, typename ...Args>
+   Entity AddComponet(std::string_view component_name, Args&& ...args)
+   {
+      mRegistry->template AddComponet<T>(*this, component_name, std::forward<Args>(args)...);
+      return *this;
+   }
+
+   template <typename T>
+   T& GetComponent(std::string_view component_name)
+   {
+      return mRegistry->template GetComponent<T>(component_name);
+   }
+
+   template <typename ...Args, int Size>
+   std::tuple<Args&...> GetComponents(std::string_view const(&component_names)[Size])
+   {
+      return mRegistry->template GetComponents<Args...>(*this, component_names);
+   }
+
    private:
       Entity(uint32_t id)
          : mID(id)

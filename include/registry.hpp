@@ -36,7 +36,6 @@ namespace recs
 
       template <typename ...Args, typename F, size_t Size>
       void ForEach(F func, const std::string_view(&component_names)[Size]);
-      //void ForEach(F func, const std::array<std::string_view, Size>& component_names);
 
       template <typename ...Args, size_t Size>
       View<Args...> GetView(const std::array<std::string_view, Size>& component_names);
@@ -100,12 +99,12 @@ namespace recs
    }
 
    template <typename ...Args, int Size>
-   std::tuple<Args&...> Registry::GetComponents(Entity entity, const std::string_view(&component_names)[Size])
+   std::tuple<Args&...> Registry::GetComponents(Entity entity, std::string_view const(&component_names)[Size])
    {
+      static_assert(sizeof...(Args) == Size, "Component names and template arguments are not equal");
+
       if (entity == iNVALID_ENTITY)
          throw std::runtime_error("Get component: invalid entity");
- 
-      static_assert(sizeof...(Args) == Size, "Components names and template arguments are not equal");
 
       return GetComponentsImpl<Args...>(entity, as_tuple(component_names), std::make_index_sequence<Size>{});
    }
@@ -115,10 +114,10 @@ namespace recs
    {
       if (entity == iNVALID_ENTITY)
          throw std::runtime_error("Has components: invalid entity"); 
-         
-      std::array<ComponentTypeID, Size> components;
 
       int i = 0;
+      std::array<ComponentTypeID, Size> components;
+
       for (auto component_name : component_names)
       {
          auto component = mMetaData.CheckComponentPoolName(component_name);
@@ -142,10 +141,10 @@ namespace recs
          else
             throw std::runtime_error("ForEach: Ivalid component name " + std::string(component_names[i]));
       }
+
       std::vector<Entity> entities;
       entities.reserve(mMetaData.mEntityComponentsMeta.size() / 4);
 
-      // Find entities with such components
       for (const auto& [entity, entity_componets] : mMetaData.mEntityComponentsMeta)
       {
          bool has_all = true; 
@@ -165,9 +164,10 @@ namespace recs
    }
 
    template <typename ...Args, typename F, size_t Size>
-   //void Registry::ForEach(F func, const std::array<std::string_view, Size>& component_names)
    void Registry::ForEach(F func, const std::string_view(&component_names)[Size])
    {
+      static_assert(sizeof...(Args) == Size, "Component names and template arguments are not equal");
+
       Pool* pools[Size];
       for (int i = 0; i < Size; i++)
       {
@@ -178,35 +178,47 @@ namespace recs
             throw std::runtime_error("ForEach: Ivalid component name " + std::string(component_names[i]));
       }
 
-      uint32_t max = 0;
+      uint32_t max_id = 0;
       size_t indicies[Size] = { 0u };
 
+      bool end = false;
       while (true)
       {
          for (int i = 0; i < Size; i++)
          {
-            if (max < indicies[i])
-               max = pools[i]->mEntities[indicies[i]].mID;
+            if (indicies[i] >= pools[i]->Size())
+               return;
+
+            if (max_id < pools[i]->mEntities[indicies[i]].mID)
+               max_id = pools[i]->mEntities[indicies[i]].mID;
          }
 
-         bool end = false;
+         bool greater = false;
          for (int i = 0; i < Size; i++)
          {
-            while (pools[i]->mEntities[indicies[i]].mID < max)
+            while (pools[i]->mEntities[indicies[i]].mID < max_id)
             {
-               if (indicies[i] < pools[i]->Size())
+               if (pools[i]->mEntities[indicies[i]].mID > max_id)
+               {
+                  greater = true;
+                  break;
+               }
+               if (indicies[i] + 1 >= pools[i]->Size())
                {
                   end = true;
                   break;
                }
                indicies[i]++;
             }
-            if (end) return;
-
-            auto tuple = MakeTupleFromPoolsAndIndicies<Args...>(pools, indicies, std::make_index_sequence<Size>{});
-            std::apply(func, tuple);
          }
+         if (greater) continue;
+         if (end) return;
 
+         auto tuple = MakeTupleFromPoolsAndIndicies<Args...>(pools, indicies, std::make_index_sequence<Size>{});
+         std::apply(func, tuple);
+
+         for (int i = 0; i < Size; i++)
+            indicies[i]++;
       }
 
    }

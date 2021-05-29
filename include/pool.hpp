@@ -80,7 +80,8 @@ namespace recs
       new(new_elem_mem) T(std::forward<Args>(args)...);
 
       mSize++;
-      return *static_cast<T*>(new_elem_mem);
+      auto& a = *static_cast<T*>(new_elem_mem);
+      return a;
    }
 
    template <typename T>

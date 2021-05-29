@@ -11,7 +11,9 @@ struct Speed
 {
    float s;
 
-   Speed(float speed) : s(speed) {}
+   Speed(float speed)
+    : s(speed)
+   {}
    bool operator==(const Speed& speed) const noexcept { return s == speed.s; } 
 };
 
@@ -78,8 +80,36 @@ int main(void)
    }
 
    {
-      auto func = [](Speed& speed){ speed.s++; };
-      registry.ForEach<Speed>(func, { "speed" } );
+      recs::Registry registry2;
+
+      std::vector<recs::Entity> entities;
+      for (int i = 0; i < 10; i++)
+      {
+         entities.push_back(registry2.CreateEntity());
+      }
+      for (int i = 0; i < 10; i++)
+      {
+         recs::Entity entity = registry2.CreateEntity();
+         registry2.AddComponet<Speed>(entity, "speed", i);
+      }
+
+      int i = 0;
+      for (auto entity : entities)
+      {
+         entity.AddComponet<Speed>("speed", 1.0f)
+               .AddComponet<Position>("position", i++, 1.0f);
+      }
+
+      int count = 0;
+      auto func = [&](Speed& speed, Position& position){ count++; };
+      registry2.ForEach<Speed, Position>(func, { "speed", "position" } );
+      assert(count == 10);
+
+      count = 0;
+      registry2.ForEach<Speed>([&](Speed& speed){ count++; }, { "speed" } );
+      assert(count == 20);
+
+
    }
 
    return 0;
