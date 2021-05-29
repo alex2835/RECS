@@ -34,9 +34,13 @@ namespace recs
       template <typename T>
       T& Get(Entity entity);
 
+      template <typename T>
+      T& Get(size_t index);
+
       uint32_t Size() const noexcept { return mSize; }
 
       void* GetRaw(Entity entity);
+      void* GetRaw(size_t index);
 
    private:
       Pool(uint32_t component_size, void(*deliter)(void*));
@@ -86,6 +90,14 @@ namespace recs
       if (raw_data)
          return *static_cast<T*>(raw_data);
       throw std::runtime_error("Entity has component, but pool doesn't (Incorrent working)");
+   }
+
+   template <typename T>
+   T& Pool::Get(size_t index)
+   {
+      if (index < Size())
+         return *static_cast<T*>(GetElemAddress(index));
+      throw std::runtime_error("Pool::Get, out of bound access");
    }
 
 }

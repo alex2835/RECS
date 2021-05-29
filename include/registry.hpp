@@ -39,19 +39,22 @@ namespace recs
       //void ForEach(F func, const std::array<std::string_view, Size>& component_names);
 
       template <typename ...Args, size_t Size>
-      View<Args...> GetView(const std::string_view(&component_names)[Size])
-      {
-         return mMetaData.GetView<Args>(component_names);
-      }
+      View<Args...> GetView(const std::array<std::string_view, Size>& component_names);
 
       const RegistryMeta& GetMetaData() { return mMetaData; };
       const auto& GetComponentPools() { return mComponentPools; };
 
    private:
-      template <typename ...Args, typename Tuple, size_t... Is>
+      template <typename ...Args, typename Tuple, size_t ...Is>
       std::tuple<Args&...> GetComponentsImpl(Entity entity, Tuple tuple, std::index_sequence<Is...>)
       {
          return std::forward_as_tuple(GetComponent<Args>(entity, std::get<Is>(tuple))...);
+      }
+
+      template <typename ...Args, size_t Size, size_t ...Is>
+      std::tuple<Args&...> MakeTupleFromPoolsAndIndicies(Pool* const(&pools)[Size], size_t const(&indicies)[Size], std::index_sequence<Is...>)
+      {
+         return std::forward_as_tuple(pools[Is]->template Get<Args>(indicies[Is])...);
       }
 
       Pool& GetComponentPool(ComponentTypeID id);
@@ -74,7 +77,7 @@ namespace recs
       if (component_type == INVALID_COMPONENT_TYPE)
       {
          component_type = mMetaData.AddComponentName(component_name);
-         mComponentPools.push_back( std::make_pair(component_type, Pool::MakePool<T>()) );
+         mComponentPools.push_back(std::make_pair(component_type, Pool::MakePool<T>()));
       }
       mMetaData.AddComponent(entity, component_type);
       Pool& pool = GetComponentPool(component_type);
@@ -96,7 +99,6 @@ namespace recs
       throw std::runtime_error("Entity doesn't have such a component " + std::string(component_name));
    }
 
-
    template <typename ...Args, int Size>
    std::tuple<Args&...> Registry::GetComponents(Entity entity, const std::string_view(&component_names)[Size])
    {
@@ -108,8 +110,7 @@ namespace recs
       return GetComponentsImpl<Args...>(entity, as_tuple(component_names), std::make_index_sequence<Size>{});
    }
 
-
-template <size_t Size>
+   template <size_t Size>
    bool Registry::HasComponents(Entity entity, const std::array<std::string_view, Size>& component_names)
    {
       if (entity == iNVALID_ENTITY)
@@ -129,6 +130,40 @@ template <size_t Size>
       return mMetaData.HasComponents(entity, components);
    }
 
+   template <typename ...Args, size_t Size>
+   View<Args...> Registry::GetView(const std::array<std::string_view, Size>& component_names)
+   {
+      std::array<ComponentTypeID, Size> components;
+      for (int i = 0; i < Size; i++)
+      {
+         ComponentTypeID component_type = CheckComponentPoolName(component_names[i]);
+         if (component_type)
+            components[i] = &GetComponentPool(component_type);
+         else
+            throw std::runtime_error("ForEach: Ivalid component name " + std::string(component_names[i]));
+      }
+      std::vector<Entity> entities;
+      entities.reserve(mMetaData.mEntityComponentsMeta.size() / 4);
+
+      // Find entities with such components
+      for (const auto& [entity, entity_componets] : mMetaData.mEntityComponentsMeta)
+      {
+         bool has_all = true; 
+         for (auto entity_component : entity_componets)
+         {
+            bool has = false;
+            for(auto component : components)
+            {
+               has |= entity_component == component;
+            }
+            has_all &= has;
+         }
+         if (has_all)
+            entities.push_back(entity);
+      }
+      return View<Args...>(std::move(entities), components);
+   }
+
    template <typename ...Args, typename F, size_t Size>
    //void Registry::ForEach(F func, const std::array<std::string_view, Size>& component_names)
    void Registry::ForEach(F func, const std::string_view(&component_names)[Size])
@@ -143,29 +178,23 @@ template <size_t Size>
             throw std::runtime_error("ForEach: Ivalid component name " + std::string(component_names[i]));
       }
 
-      int indicies[Size] = { 0 };
+      uint32_t max = 0;
+      size_t indicies[Size] = { 0u };
+
       while (true)
       {
-         uint32_t max = 0;
          for (int i = 0; i < Size; i++)
          {
             if (max < indicies[i])
                max = pools[i]->mEntities[indicies[i]].mID;
          }
 
-         // bool end = false;
-         // for (int i = 0; i < Size; i++)
-         // {
-         //    end |= pools[i]->Size() == indicies[i];
-         // }
-         // if (end) break;
-
          bool end = false;
          for (int i = 0; i < Size; i++)
          {
             while (pools[i]->mEntities[indicies[i]].mID < max)
             {
-               if (indicies[i] < pools[i]->mEntities[].Size())
+               if (indicies[i] < pools[i]->Size())
                {
                   end = true;
                   break;
@@ -174,10 +203,12 @@ template <size_t Size>
             }
             if (end) return;
 
-            //func()
+            auto tuple = MakeTupleFromPoolsAndIndicies<Args...>(pools, indicies, std::make_index_sequence<Size>{});
+            std::apply(func, tuple);
          }
 
       }
+
    }
 
 }

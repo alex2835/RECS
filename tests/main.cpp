@@ -78,7 +78,8 @@ int main(void)
    }
 
    {
-      registry.ForEach<Speed>([](Speed& speed){ speed.s++; }, { "speed" } );
+      auto func = [](Speed& speed){ speed.s++; };
+      registry.ForEach<Speed>(func, { "speed" } );
    }
 
    return 0;
