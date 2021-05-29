@@ -31,9 +31,13 @@ namespace recs
       template <size_t Size>
       bool HasComponents(Entity entity, const std::array<ComponentTypeID, Size>& components);
 
+      void Remove(Entity entity);
+
+      void RemoveComponent(Entity entity, ComponentTypeID component);
+
       /**
-       * @brief Return reference to componet name if exist
-       * or invalid INVALID_COMPONENT_TYPE
+       * @brief Return index of componet name if exist
+       * or INVALID_COMPONENT_TYPE
        */
       ComponentTypeID CheckComponentPoolName(std::string_view name);
 

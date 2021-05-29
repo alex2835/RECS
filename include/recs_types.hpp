@@ -8,7 +8,6 @@ namespace recs
    typedef uint32_t ComponentTypeID;
    constexpr ComponentTypeID INVALID_COMPONENT_TYPE = 0;
 
-
    // Ref 
    namespace detail
    {
@@ -68,61 +67,9 @@ namespace recs
    template <typename T>
    using Ref = reference<T>;
 
-
-
    // ========== Meta programming ========== 
 
-   template <typename ...Types>
-   struct TypeList;
-
-   template <typename H, typename ...T>
-   struct TypeList<H, T...>
-   {
-      using Head = H;
-      using Tail = TypeList<T...>;
-   };
-
-   template <>
-   struct TypeList<> {};
-
-   // Cons
-   template <typename H, typename TL>
-   struct Cons;
-
-   template <typename H, typename ...Types>
-   struct Cons<H, TypeList<Types...>>
-   {
-      using type = TypeList<H, Types...>;
-   };
-
-   template <typename TL1, typename TL2>
-   struct Concat;
-
-   template <typename ...Ts1, typename ...Ts2>
-   struct Concat<TypeList<Ts1...>, TypeList<Ts2...>>
-   {
-      using type = TypeList<Ts1..., Ts2...>;
-   };
-
    // Tuples
-
-   template <size_t I,typename T> 
-   struct tuple_n{
-      template< typename...Args> using type = typename tuple_n<I-1, T>::template type<T, Args...>;
-   };
-
-   template <typename T> 
-   struct tuple_n<0, T> {
-      template<typename...Args> using type = std::tuple<Args...>;   
-   };
-   template <size_t I,typename T>  using tuple_of = typename tuple_n<I,T>::template type<>;
-
-   template <typename T, size_t size>
-   decltype(auto) make_tuple_n()
-   {
-      return tuple_of<size, T>();
-   }
-
    template <typename T, size_t Size, size_t... Is>
    decltype(auto) as_tuple_impl(const T(&array)[Size], std::index_sequence<Is...>)
    {

@@ -28,9 +28,11 @@ struct Position
 
 int main(void)
 {
-   recs::Registry registry;
 
    {
+      // create entity 
+      recs::Registry registry;
+
       recs::Entity entity = registry.CreateEntity();
 
       registry.AddComponet<Speed>(entity, "speed", 0.0f);
@@ -44,11 +46,13 @@ int main(void)
       try {
          registry.HasComponent(recs::iNVALID_ENTITY, "position");
       } catch (std::exception& e) {
-         assert( std::string(e.what()) == "Has component: invalid entity");
+         assert(std::string(e.what()) == "Has component: invalid entity");
       }
    }
       
    {
+      recs::Registry registry;
+      // get component
       recs::Entity entity = registry.CreateEntity();
 
       registry.AddComponet<Speed>(entity, "speed", 1.0f);
@@ -61,6 +65,8 @@ int main(void)
    }
 
    {
+      recs::Registry registry;
+
       std::vector<recs::Entity> entities;
       for (int i = 0; i < 10; i++)
       {
@@ -80,17 +86,17 @@ int main(void)
    }
 
    {
-      recs::Registry registry2;
+      recs::Registry registry;
 
       std::vector<recs::Entity> entities;
       for (int i = 0; i < 10; i++)
       {
-         entities.push_back(registry2.CreateEntity());
+         entities.push_back(registry.CreateEntity());
       }
       for (int i = 0; i < 10; i++)
       {
-         recs::Entity entity = registry2.CreateEntity();
-         registry2.AddComponet<Speed>(entity, "speed", i);
+         recs::Entity entity = registry.CreateEntity();
+         registry.AddComponet<Speed>(entity, "speed", i);
       }
 
       int i = 0;
@@ -100,16 +106,34 @@ int main(void)
                .AddComponet<Position>("position", i++, 1.0f);
       }
 
+      // foreach
       int count = 0;
       auto func = [&](Speed& speed, Position& position){ count++; };
-      registry2.ForEach<Speed, Position>(func, { "speed", "position" } );
+      registry.ForEach<Speed, Position>(func, { "speed", "position" } );
       assert(count == 10);
 
       count = 0;
-      registry2.ForEach<Speed>([&](Speed& speed){ count++; }, { "speed" } );
+      registry.ForEach<Speed>([&](Speed& speed){ count++; }, { "speed" } );
       assert(count == 20);
 
+      // remove component
+      for (auto entity : entities)
+      {
+         entity.RemoveComponet("position");
+      }
+      count = 0;
+      registry.ForEach<Position>([&](Position& speed){ count++; }, { "position" } );
+      assert(count == 0);
 
+      // remove entity
+      for (auto entity : entities)
+      {
+         registry.RemoveEntity(entity);
+      }
+
+      count = 0;
+      registry.ForEach<Speed>([&](Speed& speed){ count++; }, { "speed" } );
+      assert(count == 10);
    }
 
    return 0;

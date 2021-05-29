@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <string_view>
 
 namespace recs
 {
@@ -38,6 +39,8 @@ namespace recs
    {
       return mRegistry->template GetComponents<Args...>(*this, component_names);
    }
+
+   Entity RemoveComponet(std::string_view component_name);
 
    private:
       Entity(uint32_t id)

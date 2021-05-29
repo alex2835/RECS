@@ -180,8 +180,6 @@ namespace recs
 
       uint32_t max_id = 0;
       size_t indicies[Size] = { 0u };
-
-      bool end = false;
       while (true)
       {
          for (int i = 0; i < Size; i++)
@@ -193,26 +191,23 @@ namespace recs
                max_id = pools[i]->mEntities[indicies[i]].mID;
          }
 
-         bool greater = false;
+         bool next = false;
          for (int i = 0; i < Size; i++)
          {
             while (pools[i]->mEntities[indicies[i]].mID < max_id)
             {
                if (pools[i]->mEntities[indicies[i]].mID > max_id)
                {
-                  greater = true;
+                  next = true;
                   break;
                }
-               if (indicies[i] + 1 >= pools[i]->Size())
-               {
-                  end = true;
-                  break;
-               }
+               
                indicies[i]++;
+               if (indicies[i] >= pools[i]->Size())
+                  return;
             }
          }
-         if (greater) continue;
-         if (end) return;
+         if (next) continue;
 
          auto tuple = MakeTupleFromPoolsAndIndicies<Args...>(pools, indicies, std::make_index_sequence<Size>{});
          std::apply(func, tuple);
