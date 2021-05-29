@@ -4,88 +4,48 @@
 #include <algorithm>
 #include <optional>
 #include <string_view>
+#include <array>
 
 #include "recs_types.hpp"
 #include "entity.hpp"
+#include "view.hpp"
 
 namespace recs
 {
-   typedef uint32_t ComponentTypeID;
-   constexpr ComponentTypeID INVALID_COMPONENT_TYPE = 0;
 
+   /**
+    * @brief 
+    * 
+    */
    class RegistryMeta
    {
    public:
+      RegistryMeta();
 
-      RegistryMeta()
-         : mEntityCounter(1)
-         , mComponentCounter(1)
-      {}
+      Entity CreateEntity();
 
-      Entity CreateEntity()
-      {
-         Entity entity(mEntityCounter++);
-         
-         std::vector<ComponentTypeID> components_ids;
-         components_ids.reserve(5);
+      OptRef<std::vector<ComponentTypeID>> GetEntityComponents(Entity entity);
 
-         mEntityComponentsMeta.emplace_back(entity, std::move(components_ids));
-         return entity;
-      }
+      bool HasComponent(Entity entity, ComponentTypeID component);
 
-      OptRef<std::vector<ComponentTypeID>>
-      GetEntityComponents(Entity entity)
-      {
-         auto iterator = std::find_if(mEntityComponentsMeta.begin(), mEntityComponentsMeta.end(),
-                                        [entity](const auto& entity_components){ return entity_components.first == entity; });
-         
-         if (iterator != mEntityComponentsMeta.end())
-            return iterator->second;
+      template <size_t Size>
+      bool HasComponents(Entity entity, const std::array<ComponentTypeID, Size>& components);
 
-         return std::nullopt;
-      }
-
-      bool HasComponent(Entity entity, ComponentTypeID component)
-      {
-         auto components = GetEntityComponents(entity);   
-         return component ? HasComponent(*components, component) : false;
-      }
+      template <typename ...Args, size_t Size>
+      View<Args...> GetView(const std::array<std::string_view, Size>& component_names);
 
       /**
        * @brief Return reference to componet name if exist
+       * or invalid INVALID_COMPONENT_TYPE
        */
-      ComponentTypeID CheckComponentPoolName(std::string_view name)
-      {
-         auto iterator = std::find_if(mComponentNames.begin(), mComponentNames.end(), 
-                                          [name](const auto& id_name){ return id_name.second == name; });
-         
-         return iterator != mComponentNames.end() ? iterator->first : INVALID_COMPONENT_TYPE;
-      }
+      ComponentTypeID CheckComponentPoolName(std::string_view name);
 
-      ComponentTypeID AddComponentName(std::string_view name)
-      {
-         ComponentTypeID component = mComponentCounter++;
-         mComponentNames.emplace_back(component, name);
-         return component;
-      }
+      ComponentTypeID AddComponentName(std::string_view name);
 
-      bool AddComponent(Entity entity, ComponentTypeID component)
-      {
-         auto components = GetEntityComponents(entity);
-         if (components && !HasComponent(entity, component))
-         {
-            components->get().push_back(component);
-            return true;
-         }
-         return false;
-      }
+      bool AddComponent(Entity entity, ComponentTypeID component);
 
    private:
-      bool HasComponent(Ref<std::vector<ComponentTypeID>> components, ComponentTypeID component)
-      {
-         auto iterator = std::find(components->begin(), components->end(), component);
-         return iterator != components->end();
-      }
+      bool HasComponent(Ref<std::vector<ComponentTypeID>> components, ComponentTypeID component);
       
    private:
       uint32_t mEntityCounter;
@@ -93,5 +53,42 @@ namespace recs
       std::vector<std::pair<Entity, std::vector<ComponentTypeID>>> mEntityComponentsMeta;
       std::vector<std::pair<ComponentTypeID, std::string>> mComponentNames;
    };
+
+
+   // Implementation
+
+   template <typename ...Args, size_t Size>
+   View<Args...> RegistryMeta::GetView(const std::array<std::string_view, Size>& component_names)
+   {
+      std::array<ComponentTypeID, Size> components;
+      for (int i = 0; i < Size; i++)
+      {
+         ComponentTypeID component_type = mMetaData.CheckComponentPoolName(component_names[i]);
+         if (component_type)
+            components[i] = &GetComponentPool(component_type);
+         else
+            throw std::runtime_error("ForEach: Ivalid component name " + std::string(component_names[i]));
+      }
+      std::vector<Entity> entities;
+      entities.reserve(mEntityComponentsMeta.size() / 4;
+
+      // Find entities with such components
+      for (const auto& [entity, entity_componets] : mEntityComponentsMeta)
+      {
+         bool has_all = true; 
+         for (auto entity_component : entity_componets)
+         {
+            bool has = false;
+            for(auto component : components)
+            {
+               has |= entity_component == component;
+            }
+            has_all &= has;
+         }
+         if (has_all)
+            entities.push_back(entity);
+      }
+      return View<Args...>(std::move(entities), components);
+   }
    
 }

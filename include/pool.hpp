@@ -11,7 +11,7 @@
 namespace recs
 {
    /**
-    * @brief Store components data
+    * @brief Store sorted components data
     */
    class Pool
    {
@@ -27,83 +27,65 @@ namespace recs
       Pool& operator=(Pool&&) = default;
 
       template <typename T, typename ...Args>
-      T& Push(Entity entity, Args&& ...args)
-      {
-         if (mCapacity <= mSize + 1)
-            Realoc(2 * mSize + 1);
+      T& Push(Entity entity, Args&& ...args);
 
-         void* new_elem_mem = GetElemAddress(mSize);
-         
-         mEntities.push_back(entity);
-         new(new_elem_mem) T(std::forward<Args>(args)...);
-
-         mSize++;
-         return *static_cast<T*>(new_elem_mem);
-      }
-
-      void Remove(Entity entity)
-      {
-         
-      }
+      void Remove(Entity entity);
 
       template <typename T>
-      T& Get(Entity entity)
-      {
-         void* raw_data = GetRaw(entity);
-         if (raw_data)
-            return *static_cast<T*>(raw_data);
-         throw std::runtime_error("Entity has component, but pool doesn't (Incorrent working)");
-      }
+      T& Get(Entity entity);
 
-      void* GetRaw(Entity entity)
-      {
-         auto iterator = std::find(mEntities.begin(), mEntities.end(), entity);
-         if (iterator != mEntities.end())
-         {
-            uint32_t position = iterator - mEntities.begin();
-            return GetElemAddress(position);
-         }
-         return nullptr;
-      }
+      uint32_t Size() const noexcept { return mSize; }
+
+      void* GetRaw(Entity entity);
 
    private:
-      Pool(uint32_t component_size, void(*deliter)(void*))
-         : mComponentSize(component_size)
-         , mSize(0)
-         , mCapacity(0)
-         , mDeliter(deliter)
-      {
-         Realoc(10);
-      }
+      Pool(uint32_t component_size, void(*deliter)(void*));
 
       Pool(const Pool&);
       Pool& operator=(const Pool&);
 
-      void Realoc(uint32_t new_capacity)
-      {
-         if (mCapacity < new_capacity)
-         {
-            char* new_data = new char[new_capacity * mComponentSize];
-            memmove(new_data, mData.get(), mComponentSize * mSize);
-            mData.reset(new_data);
-            mCapacity = new_capacity;
-         }
-      }
-
-      void* GetElemAddress(uint32_t size)
-      {
-         return &mData[mComponentSize * size];
-      }
+      void Realloc(uint32_t new_capacity);
+      void* GetElemAddress(uint32_t size);
 
    private:
       uint32_t mComponentSize;
       uint32_t mSize;
       uint32_t mCapacity;
       std::unique_ptr<char[]> mData;
-      
       std::vector<Entity> mEntities;
-
       void(*mDeliter)(void* component);
-    };
+
+      friend class Registry;
+   };
+
+
+    // Implementation
+
+   template <typename T, typename ...Args>
+   T& Pool::Push(Entity entity, Args&& ...args)
+   {
+      if (mCapacity <= mSize + 1)
+         Realloc(2 * mSize + 1);
+
+      auto iterator = std::lower_bound(mEntities.begin(), mEntities.end(), entity);
+      int  position = iterator != mEntities.end() ? iterator - mEntities.begin() : mSize;
+
+      mEntities.insert(iterator, entity);
+      std::memmove(GetElemAddress(position + 1), GetElemAddress(position), mComponentSize * (mSize - position));
+      void* new_elem_mem = GetElemAddress(position);
+      new(new_elem_mem) T(std::forward<Args>(args)...);
+
+      mSize++;
+      return *static_cast<T*>(new_elem_mem);
+   }
+
+   template <typename T>
+   T& Pool::Get(Entity entity)
+   {
+      void* raw_data = GetRaw(entity);
+      if (raw_data)
+         return *static_cast<T*>(raw_data);
+      throw std::runtime_error("Entity has component, but pool doesn't (Incorrent working)");
+   }
 
 }

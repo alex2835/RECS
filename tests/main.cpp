@@ -1,9 +1,9 @@
 
-#include "include/registry.hpp"
-#include "include/registry_meta.hpp"
-#include "include/entity.hpp"
-#include "include/pool.hpp"
-#include "include/view.hpp"
+#include "registry.hpp"
+#include "registry_meta.hpp"
+#include "entity.hpp"
+#include "pool.hpp"
+#include "view.hpp"
 
 #include <cassert>
 #include <iostream>
@@ -42,20 +42,43 @@ int main(void)
       try {
          registry.HasComponent(recs::iNVALID_ENTITY, "position");
       } catch (std::exception& e) {
-         std::cout << e.what() << std::endl;
+         assert( std::string(e.what()) == "Has component: invalid entity");
       }
    }
       
    {
       recs::Entity entity = registry.CreateEntity();
 
-      registry.AddComponet<Speed>(entity, "speed", 0.0f);
+      registry.AddComponet<Speed>(entity, "speed", 1.0f);
       registry.AddComponet<Position>(entity, "position", 0.0f, 0.0f);
 
       auto [speed, position] = registry.GetComponents<Speed, Position>(entity, { "speed", "position" } );
 
       speed.s += 1.0f;
       assert(speed == registry.GetComponent<Speed>(entity, "speed"));
+   }
+
+   {
+      std::vector<recs::Entity> entities;
+      for (int i = 0; i < 10; i++)
+      {
+         entities.push_back(registry.CreateEntity());
+      }
+
+      for (int i = 0; i < 10; i++)
+      {
+         recs::Entity entity = registry.CreateEntity();
+         registry.AddComponet<Speed>(entity, "speed", i);
+      }
+
+      for (auto entity : entities)
+      {
+         registry.AddComponet<Speed>(entity, "speed", 5);
+      }
+   }
+
+   {
+      registry.ForEach<Speed>([](Speed& speed){ speed.s++; }, { "speed" } );
    }
 
    return 0;

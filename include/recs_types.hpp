@@ -5,6 +5,11 @@
 
 namespace recs
 {
+   typedef uint32_t ComponentTypeID;
+   constexpr ComponentTypeID INVALID_COMPONENT_TYPE = 0;
+
+
+   // Ref 
    namespace detail
    {
       template <class T> constexpr T& FUN(T& t) noexcept { return t; }
@@ -80,20 +85,6 @@ namespace recs
    template <>
    struct TypeList<> {};
 
-
-   // Length
-   template <typename TL>
-   struct Length
-   {
-      static int const value = 1 + Length<typename TL::Tail>::value;
-   };
-
-   template <>
-   struct Length<TypeList<>>
-   {
-      static int const value = 0;
-   };
-
    // Cons
    template <typename H, typename TL>
    struct Cons;
@@ -113,6 +104,8 @@ namespace recs
       using type = TypeList<Ts1..., Ts2...>;
    };
 
+   // Tuples
+
    template <size_t I,typename T> 
    struct tuple_n{
       template< typename...Args> using type = typename tuple_n<I-1, T>::template type<T, Args...>;
@@ -128,12 +121,6 @@ namespace recs
    decltype(auto) make_tuple_n()
    {
       return tuple_of<size, T>();
-   }
-
-   template <typename T>
-   decltype(auto) make_tuple_from_initializer_list(std::initializer_list<T> list)
-   {
-      return make_tuple_n<T, 2>();
    }
 
    template <typename T, size_t Size, size_t... Is>
