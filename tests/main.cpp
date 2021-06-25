@@ -136,5 +136,30 @@ int main(void)
       assert(count == 10);
    }
 
+   {
+      recs::Registry registry;
+
+      std::vector<recs::Entity> entities;
+      for (int i = 0; i < 10; i++)
+      {
+         entities.push_back(registry.CreateEntity());
+      }
+      for (int i = 0; i < 10; i++)
+      {
+         recs::Entity entity = registry.CreateEntity();
+         registry.AddComponet<Speed>(entity, "speed", i);
+      }
+
+      int i = 0;
+      for (auto entity : entities)
+      {
+         entity.AddComponet<Speed>("speed", 1.0f)
+               .AddComponet<Position>("position", i++, 1.0f);
+      }
+
+      auto view = registry.GetView<Speed, Position>({ "speed", "position" });
+      assert(view.Size() == 10);
+   }
+
    return 0;
 }

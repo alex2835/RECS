@@ -32,13 +32,13 @@ namespace recs
       bool HasComponent(Entity entity, std::string_view component_name);
 
       template <size_t Size>
-      bool HasComponents(Entity entity, const std::array<std::string_view, Size>& component_names);
+      bool HasComponents(Entity entity, const std::string_view(&component_names)[Size]);
 
       template <typename ...Args, typename F, size_t Size>
       void ForEach(F func, const std::string_view(&component_names)[Size]);
 
       template <typename ...Args, size_t Size>
-      View<Args...> GetView(const std::array<std::string_view, Size>& component_names);
+      View<Args...> GetView(const std::string_view(&component_names)[Size]);
 
       const RegistryMeta& GetMetaData() { return mMetaData; };
       const auto& GetComponentPools() { return mComponentPools; };
@@ -110,7 +110,7 @@ namespace recs
    }
 
    template <size_t Size>
-   bool Registry::HasComponents(Entity entity, const std::array<std::string_view, Size>& component_names)
+   bool Registry::HasComponents(Entity entity, const std::string_view(&component_names)[Size])
    {
       if (entity == iNVALID_ENTITY)
          throw std::runtime_error("Has components: invalid entity"); 
@@ -130,37 +130,65 @@ namespace recs
    }
 
    template <typename ...Args, size_t Size>
-   View<Args...> Registry::GetView(const std::array<std::string_view, Size>& component_names)
+   View<Args...> Registry::GetView(const std::string_view(&component_names)[Size])
    {
-      std::array<ComponentTypeID, Size> components;
+      static_assert(sizeof...(Args) == Size, "Component names and template arguments are not equal");
+
+      Pool* pools[Size];
+      std::vector<Entity> entities;
+      std::vector<std::tuple<Args&...>> components;
+      entities.reserve(mMetaData.mEntityComponentsMeta.size() / 4);
+
       for (int i = 0; i < Size; i++)
       {
-         ComponentTypeID component_type = CheckComponentPoolName(component_names[i]);
+         ComponentTypeID component_type = mMetaData.CheckComponentPoolName(component_names[i]);
          if (component_type)
-            components[i] = &GetComponentPool(component_type);
+            pools[i] = &GetComponentPool(component_type);
          else
             throw std::runtime_error("ForEach: Ivalid component name " + std::string(component_names[i]));
       }
 
-      std::vector<Entity> entities;
-      entities.reserve(mMetaData.mEntityComponentsMeta.size() / 4);
-
-      for (const auto& [entity, entity_componets] : mMetaData.mEntityComponentsMeta)
+      uint32_t max_id = 0;
+      size_t indicies[Size] = { 0u };
+      while (true)
       {
-         bool has_all = true; 
-         for (auto entity_component : entity_componets)
+         for (int i = 0; i < Size; i++)
          {
-            bool has = false;
-            for(auto component : components)
-            {
-               has |= entity_component == component;
-            }
-            has_all &= has;
+            if (indicies[i] >= pools[i]->Size())
+               goto end;
+
+            if (max_id < pools[i]->mEntities[indicies[i]].mID)
+               max_id = pools[i]->mEntities[indicies[i]].mID;
          }
-         if (has_all)
-            entities.push_back(entity);
+
+         bool next = false;
+         for (int i = 0; i < Size; i++)
+         {
+            while (pools[i]->mEntities[indicies[i]].mID < max_id)
+            {
+               if (pools[i]->mEntities[indicies[i]].mID > max_id)
+               {
+                  next = true;
+                  break;
+               }
+               
+               indicies[i]++;
+               if (indicies[i] >= pools[i]->Size())
+                  goto end;
+            }
+         }
+         if (next) continue;
+
+         entities.push_back(Entity(max_id));
+         
+         auto tuple = MakeTupleFromPoolsAndIndicies<Args...>(pools, indicies, std::make_index_sequence<Size>{});
+         components.push_back(tuple);
+
+         for (int i = 0; i < Size; i++)
+            indicies[i]++;
       }
-      return View<Args...>(std::move(entities), components);
+      end:
+      return View<Args...>(std::move(entities), std::move(components), component_names);
    }
 
    template <typename ...Args, typename F, size_t Size>

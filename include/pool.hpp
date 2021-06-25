@@ -25,6 +25,7 @@ namespace recs
 
       Pool(Pool&&) = default;
       Pool& operator=(Pool&&) = default;
+      ~Pool();
 
       template <typename T, typename ...Args>
       T& Push(Entity entity, Args&& ...args);

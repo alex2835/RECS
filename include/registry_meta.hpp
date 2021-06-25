@@ -39,7 +39,7 @@ namespace recs
        * @brief Return index of componet name if exist
        * or INVALID_COMPONENT_TYPE
        */
-      ComponentTypeID CheckComponentPoolName(std::string_view name);
+      ComponentTypeID CheckComponentPoolName(const std::string_view name);
 
       ComponentTypeID AddComponentName(std::string_view name);
 

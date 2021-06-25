@@ -3,6 +3,14 @@
 
 namespace recs
 {
+      Pool::~Pool()
+      {
+         for (int i = 0; i < mSize; i++)
+         {
+            mDeliter(GetElemAddress(i));
+         }
+      }
+
       void Pool::Remove(Entity entity)
       {
          auto iterator = std::lower_bound(mEntities.begin(), mEntities.end(), entity);

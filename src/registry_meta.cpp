@@ -37,7 +37,7 @@ namespace recs
       return component ? HasComponent(*components, component) : false;
    }
       
-   ComponentTypeID RegistryMeta::CheckComponentPoolName(std::string_view name)
+   ComponentTypeID RegistryMeta::CheckComponentPoolName(const std::string_view name)
    {
       auto iterator = std::find_if(mComponentNames.begin(), mComponentNames.end(), 
                                        [name](const auto& id_name){ return id_name.second == name; });
