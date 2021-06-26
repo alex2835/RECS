@@ -65,8 +65,8 @@ namespace recs
 
    bool RegistryMeta::HasComponent(Ref<std::vector<ComponentTypeID>> components, ComponentTypeID component)
    {
-      auto iterator = std::find(components->begin(), components->end(), component);
-      return iterator != components->end();
+      auto iterator = std::find(components.get().begin(), components.get().end(), component);
+      return iterator != components.get().end();
    }
 
    void RegistryMeta::Remove(Entity entity)
