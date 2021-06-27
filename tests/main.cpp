@@ -159,6 +159,12 @@ int main(void)
 
       auto view = registry.GetView<Speed, Position>({ "speed", "position" });
       assert(view.Size() == 10);
+
+
+      // Clone 
+      recs::Registry registry_copy;
+      registry.CloneInto(registry_copy);
+
    }
 
    return 0;

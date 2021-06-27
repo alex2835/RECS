@@ -3,34 +3,50 @@
 
 namespace recs
 {
+      Pool::Pool(uint32_t component_size, void(*delete_func)(void*), void(*copy_func)(const void*, void*))
+         : mSize(0),
+           mCapacity(0),
+           mComponentSize(component_size),
+           mDoDelete(delete_func),
+           mDoCopy(copy_func)
+      {
+         Realloc(10);
+      }
+      
+      Pool Pool::Clone() const
+      {
+         Pool pool;
+         pool.mEntities = mEntities;
+         pool.mDoDelete = mDoDelete;
+         pool.mDoCopy   = mDoCopy;
+
+         pool.mComponentSize = mComponentSize;
+         pool.Realloc(mCapacity);
+         pool.mSize = mSize;
+         
+         for (uint32_t i = 0; i < pool.mSize; i++)
+            pool.mDoCopy(GetElemAddressConst(i), pool.GetElemAddress(i));
+
+         return pool;
+      }
+
       Pool::~Pool()
       {
-         for (int i = 0; i < mSize; i++)
-         {
-            mDeliter(GetElemAddress(i));
-         }
+         for (uint32_t i = 0; i < mSize; i++)
+            mDoDelete(GetElemAddress(i));
       }
 
       void Pool::Remove(Entity entity)
       {
          auto iterator = std::lower_bound(mEntities.begin(), mEntities.end(), entity);
-         int  position = iterator != mEntities.end() ? iterator - mEntities.begin() : mSize;
+         int position = iterator != mEntities.end() ? iterator - mEntities.begin() : mSize;
          
          mEntities.erase(iterator);
 
-         mDeliter(GetElemAddress(position));
+         mDoDelete(GetElemAddress(position));
          std::memmove(GetElemAddress(position), GetElemAddress(position + 1), mComponentSize * (mSize - position - 1));
 
          mSize--;
-      }
-
-      Pool::Pool(uint32_t component_size, void(*deliter)(void*))
-         : mComponentSize(component_size),
-           mSize(0),
-           mCapacity(0),
-           mDeliter(deliter)
-      {
-         Realloc(10);
       }
 
       void* Pool::GetRaw(Entity entity)
@@ -38,7 +54,7 @@ namespace recs
          auto iterator = std::lower_bound(mEntities.begin(), mEntities.end(), entity);
          if (iterator != mEntities.end())
          {
-            uint32_t position = iterator - mEntities.begin();
+            int position = iterator - mEntities.begin();
             return GetElemAddress(position);
          }
          return nullptr;
@@ -56,6 +72,11 @@ namespace recs
       }
 
       void* Pool::GetElemAddress(uint32_t size)
+      {
+         return &mData[mComponentSize * size];
+      }
+
+      const void* Pool::GetElemAddressConst(uint32_t size) const
       {
          return &mData[mComponentSize * size];
       }

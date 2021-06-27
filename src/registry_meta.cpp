@@ -8,9 +8,10 @@ namespace recs
         mComponentCounter(1)
    {}
 
-   Entity RegistryMeta::CreateEntity()
+   Entity RegistryMeta::CreateEntity(void* registry)
    {
       Entity entity(mEntityCounter++);
+      entity.mRegistry = static_cast<Registry*>(registry);
          
       std::vector<ComponentTypeID> components_ids;
       components_ids.reserve(5);

@@ -17,12 +17,10 @@ namespace recs
       {}
 
       template <typename F>
-      void ForEach(F&& f)
+      void ForEach(F&& func)
       {
          for (auto& components : mComponents)
-         {
-            std::apply(f, components);
-         }
+            std::apply(std::forward<F>(func), components);
       }
 
       std::tuple<Args&...> Get(Entity entity)
@@ -38,16 +36,13 @@ namespace recs
          return mComponents[pos];
       }
 
-      template <typename ...LocalArgs>
-      std::tuple<LocalArgs&...> Get(std::array<ComponentTypeID, sizeof...(LocalArgs)> components)
-      {
-         
-      }
-
       size_t Size() { return mEntities.size(); }
+
+      auto& GetEntities() { return mEntities; }
+      auto& GetComponets() { return mComponents; }
       
-      auto begin() { return mEntities.begin(); }
-      auto end() { return mEntities.end(); }
+      auto begin() { return mComponents.begin(); }
+      auto end() { return mComponents.end(); }
          
    private:
       std::vector<Entity> mEntities;

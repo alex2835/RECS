@@ -14,6 +14,12 @@ namespace recs
    class Registry
    {
    public:
+      Registry() = default;
+      Registry(const Registry&) = delete;
+      Registry& operator=(const Registry&) = delete;
+      Registry(Registry&&) = delete;
+      Registry& operator=(Registry&&) = delete;
+
       Entity CreateEntity();
 
       void RemoveEntity(Entity entity);
@@ -35,13 +41,12 @@ namespace recs
       bool HasComponents(Entity entity, const std::string_view(&component_names)[Size]);
 
       template <typename ...Args, typename F, size_t Size>
-      void ForEach(F func, const std::string_view(&component_names)[Size]);
+      void ForEach(F&& func, const std::string_view(&component_names)[Size]);
 
       template <typename ...Args, size_t Size>
       View<Args...> GetView(const std::string_view(&component_names)[Size]);
 
-      const RegistryMeta& GetMetaData() { return mMetaData; };
-      const auto& GetComponentPools() { return mComponentPools; };
+      void CloneInto(Registry&);
 
    private:
       template <typename ...Args, typename Tuple, size_t ...Is>
@@ -59,7 +64,7 @@ namespace recs
       Pool& GetComponentPool(ComponentTypeID id);
 
    private:
-      RegistryMeta mMetaData;
+      RegistryMeta mRegistryMeta;
       std::vector<std::pair<ComponentTypeID, Pool>> mComponentPools;
    };
 
@@ -72,13 +77,13 @@ namespace recs
       if (entity == iNVALID_ENTITY)
          throw std::runtime_error("Add component: invalid entity");
 
-      ComponentTypeID component_type = mMetaData.CheckComponentPoolName(component_name);
+      ComponentTypeID component_type = mRegistryMeta.CheckComponentPoolName(component_name);
       if (component_type == INVALID_COMPONENT_TYPE)
       {
-         component_type = mMetaData.AddComponentName(component_name);
+         component_type = mRegistryMeta.AddComponentName(component_name);
          mComponentPools.push_back(std::make_pair(component_type, Pool::MakePool<T>()));
       }
-      mMetaData.AddComponent(entity, component_type);
+      mRegistryMeta.AddComponent(entity, component_type);
       Pool& pool = GetComponentPool(component_type);
       pool.Push<T>(entity, std::forward<Args>(args)...);
    }
@@ -89,7 +94,7 @@ namespace recs
       if (entity == iNVALID_ENTITY)
          throw std::runtime_error("Get component: invalid entity");
 
-      ComponentTypeID component_type = mMetaData.CheckComponentPoolName(component_name);
+      ComponentTypeID component_type = mRegistryMeta.CheckComponentPoolName(component_name);
       if (component_type)
       {
          Pool& pool = GetComponentPool(component_type);
@@ -120,13 +125,13 @@ namespace recs
 
       for (auto component_name : component_names)
       {
-         auto component = mMetaData.CheckComponentPoolName(component_name);
+         auto component = mRegistryMeta.CheckComponentPoolName(component_name);
          if (component)
             components[i++] = component;
          else
             throw std::runtime_error("Has components: invalid component name " + std::string(component_name));
       }
-      return mMetaData.HasComponents(entity, components);
+      return mRegistryMeta.HasComponents(entity, components);
    }
 
    template <typename ...Args, size_t Size>
@@ -137,11 +142,11 @@ namespace recs
       Pool* pools[Size];
       std::vector<Entity> entities;
       std::vector<std::tuple<Args&...>> components;
-      entities.reserve(mMetaData.mEntityComponentsMeta.size() / 4);
+      entities.reserve(mRegistryMeta.mEntityComponentsMeta.size() / 4);
 
       for (int i = 0; i < Size; i++)
       {
-         ComponentTypeID component_type = mMetaData.CheckComponentPoolName(component_names[i]);
+         ComponentTypeID component_type = mRegistryMeta.CheckComponentPoolName(component_names[i]);
          if (component_type)
             pools[i] = &GetComponentPool(component_type);
          else
@@ -192,14 +197,14 @@ namespace recs
    }
 
    template <typename ...Args, typename F, size_t Size>
-   void Registry::ForEach(F func, const std::string_view(&component_names)[Size])
+   void Registry::ForEach(F&& func, const std::string_view(&component_names)[Size])
    {
       static_assert(sizeof...(Args) == Size, "Component names and template arguments are not equal");
 
       Pool* pools[Size];
       for (int i = 0; i < Size; i++)
       {
-         ComponentTypeID component_type = mMetaData.CheckComponentPoolName(component_names[i]);
+         ComponentTypeID component_type = mRegistryMeta.CheckComponentPoolName(component_names[i]);
          if (component_type)
             pools[i] = &GetComponentPool(component_type);
          else
@@ -238,7 +243,7 @@ namespace recs
          if (next) continue;
 
          auto tuple = MakeTupleFromPoolsAndIndicies<Args...>(pools, indicies, std::make_index_sequence<Size>{});
-         std::apply(func, tuple);
+         std::apply(std::forward<F>(func), tuple);
 
          for (int i = 0; i < Size; i++)
             indicies[i]++;

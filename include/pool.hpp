@@ -19,10 +19,13 @@ namespace recs
       template <typename T>
       static Pool MakePool()
       {
-         auto deliter = [](void* component){ static_cast<T*>(component)->~T(); };
-         return Pool(sizeof(T), deliter);
+         auto delete_func = [](void* component){ static_cast<T*>(component)->~T(); };
+         auto copy_func = [](const void* from, void* to){  new (to) T(*static_cast<const T*>(from)); };
+         return Pool(sizeof(T), delete_func, copy_func);
       }
 
+      Pool(const Pool&);
+      Pool& operator=(const Pool&) = delete;
       Pool(Pool&&) = default;
       Pool& operator=(Pool&&) = default;
       ~Pool();
@@ -43,22 +46,25 @@ namespace recs
       void* GetRaw(Entity entity);
       void* GetRaw(size_t index);
 
-   private:
-      Pool(uint32_t component_size, void(*deliter)(void*));
+      Pool Clone() const;
 
-      Pool(const Pool&);
-      Pool& operator=(const Pool&);
+   private:
+      Pool() = default;
+      Pool(uint32_t component_size, void(*delete_func)(void*), void(*copy_func)(const void*, void*));
 
       void Realloc(uint32_t new_capacity);
       void* GetElemAddress(uint32_t size);
+      const void* GetElemAddressConst(uint32_t size) const;
 
    private:
-      uint32_t mComponentSize;
-      uint32_t mSize;
-      uint32_t mCapacity;
+      uint32_t mSize = 0;
+      uint32_t mCapacity = 0;
+      uint32_t mComponentSize = 0;
       std::unique_ptr<char[]> mData;
       std::vector<Entity> mEntities;
-      void(*mDeliter)(void* component);
+
+      void(*mDoDelete)(void* component);
+      void(*mDoCopy)(const void* from, void* to);
 
       friend class Registry;
    };

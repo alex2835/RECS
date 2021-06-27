@@ -14,15 +14,15 @@ namespace recs
 {
 
    /**
-    * @brief 
-    * 
+    * @brief Store components names and
+    * information what components each Entity contains 
     */
    class RegistryMeta
    {
    public:
       RegistryMeta();
 
-      Entity CreateEntity();
+      Entity CreateEntity(void*);
 
       OptRef<std::vector<ComponentTypeID>> GetEntityComponents(Entity entity);
 

@@ -8,8 +8,8 @@ SET(SOURCE
    "src/registry_meta.cpp"
 )
 
-#add_library(RECS STATIC ${SOURCE})
-add_executable(RECS ${SOURCE} "tests/main.cpp")
+add_library(RECS STATIC ${SOURCE})
+#add_executable(RECS ${SOURCE} "tests/main.cpp")
 
 target_include_directories(
    RECS PUBLIC
