@@ -1,11 +1,13 @@
 #pragma once
+
 #include <memory>
 #include <mutex>
 #include <tuple>
 #include <vector>
 #include <algorithm>
+#include <unordered_map>
 
-#include "recs_types.hpp"
+#include "utils.hpp"
 #include "entity.hpp"
 
 namespace recs
@@ -16,6 +18,8 @@ namespace recs
    class Pool
    {
    public:
+      Pool() = default;
+
       template <typename T>
       static Pool MakePool()
       {
@@ -49,7 +53,7 @@ namespace recs
       Pool Clone() const;
 
    private:
-      Pool() = default;
+      //Pool() = default;
       Pool(uint32_t component_size, void(*delete_func)(void*), void(*copy_func)(const void*, void*));
 
       void Realloc(uint32_t new_capacity);
@@ -63,10 +67,10 @@ namespace recs
       std::unique_ptr<char[]> mData;
       std::vector<Entity> mEntities;
 
-      void(*mDoDelete)(void* component);
-      void(*mDoCopy)(const void* from, void* to);
+      void(*mDoDelete)(void* component) = nullptr;
+      void(*mDoCopy)(const void* from, void* to) = nullptr;
 
-      friend class Registry;
+      friend class Registry;;
    };
 
 

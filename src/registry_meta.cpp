@@ -3,20 +3,17 @@
 
 namespace recs
 {
+   int TYPE_ID_SEQUENCE = 1;
+
    RegistryMeta::RegistryMeta()
-      : mEntityCounter(1),
-        mComponentCounter(1)
+      : mEntityCounter(1)
    {}
 
    Entity RegistryMeta::CreateEntity(void* registry)
    {
       Entity entity(mEntityCounter++);
       entity.mRegistry = static_cast<Registry*>(registry);
-         
-      std::vector<ComponentTypeID> components_ids;
-      components_ids.reserve(5);
-
-      mEntityComponentsMeta.emplace_back(entity, std::move(components_ids));
+      mEntityComponentsMeta[entity];
       return entity;
    }
 
@@ -32,39 +29,28 @@ namespace recs
       return std::nullopt;
    }
 
+   bool RegistryMeta::HasComponentTypeID(ComponentTypeID id)
+   {
+      return std::find(mComponents.begin(), mComponents.end(), id) != mComponents.end();
+   }
+
+   void RegistryMeta::AddComponentTypeID(ComponentTypeID id)
+   {
+      mComponents.push_back(id);
+   }
+
    bool RegistryMeta::HasComponent(Entity entity, ComponentTypeID component)
    {
       auto components = GetEntityComponents(entity);   
-      return component ? HasComponent(*components, component) : false;
-   }
-      
-   ComponentTypeID RegistryMeta::CheckComponentPoolName(const std::string_view name)
-   {
-      auto iterator = std::find_if(mComponentNames.begin(), mComponentNames.end(), 
-                                       [name](const auto& id_name){ return id_name.second == name; });
-         
-      return iterator != mComponentNames.end() ? iterator->first : INVALID_COMPONENT_TYPE;
+      return component && HasComponent(*components, component);
    }
 
-   ComponentTypeID RegistryMeta::AddComponentName(std::string_view name)
+   void RegistryMeta::AddComponent(Entity entity, ComponentTypeID component)
    {
-      ComponentTypeID component = mComponentCounter++;
-      mComponentNames.emplace_back(component, name);
-      return component;
+      mEntityComponentsMeta[entity].push_back(component);
    }
 
-   bool RegistryMeta::AddComponent(Entity entity, ComponentTypeID component)
-   {
-      auto components = GetEntityComponents(entity);
-      if (components && !HasComponent(entity, component))
-      {
-         components->get().push_back(component);
-         return true;
-      }
-      return false;
-   }
-
-   bool RegistryMeta::HasComponent(Ref<std::vector<ComponentTypeID>> components, ComponentTypeID component)
+   bool RegistryMeta:: HasComponent(Ref<std::vector<ComponentTypeID>> components, ComponentTypeID component)
    {
       auto iterator = std::find(components.get().begin(), components.get().end(), component);
       return iterator != components.get().end();

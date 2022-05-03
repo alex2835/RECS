@@ -1,19 +1,16 @@
 #pragma once
-
 #include "entity.hpp"
-#include "recs_types.hpp"
+#include "utils.hpp"
 namespace recs
 {
-   template<typename ...Args>
+   template<typename ...Components>
    class View
    {
    public:
       View( std::vector<Entity>&& entities,
-            std::vector<std::tuple<Args&...>>&& components,
-            const std::string_view(&component_names)[sizeof...(Args)])
+            std::vector<std::tuple<Components&...>>&& components )
          : mEntities(std::move(entities)),
-           mComponents(std::move(components)),
-           mComponentNames(component_names)
+           mComponents(std::move(components))
       {}
 
       template <typename F>
@@ -23,7 +20,7 @@ namespace recs
             std::apply(std::forward<F>(func), components);
       }
 
-      std::tuple<Args&...> Get(Entity entity)
+      std::tuple<Components&...> Get(Entity entity)
       {
          auto iterator = std::find(begin(), end(), entity);
          if (iterator == end())
@@ -31,7 +28,7 @@ namespace recs
          return *iterator;
       }
 
-      std::tuple<Args&...> Get(size_t pos)
+      std::tuple<Components&...> Get(size_t pos)
       {
          return mComponents[pos];
       }
@@ -46,8 +43,7 @@ namespace recs
          
    private:
       std::vector<Entity> mEntities;
-      std::vector<std::tuple<Args&...>> mComponents;
-      const std::string_view(&mComponentNames)[sizeof...(Args)];
+      std::vector<std::tuple<Components&...>> mComponents;
    };
    
 }

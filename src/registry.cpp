@@ -25,27 +25,6 @@ namespace recs
          }
       }
 
-      void Registry::RemoveComponet(Entity entity, std::string_view component_name)
-      {
-         ComponentTypeID component = mRegistryMeta.CheckComponentPoolName(component_name);
-         if (mRegistryMeta.HasComponent(entity, component))
-         {
-            auto iterator = std::find_if(mComponentPools.begin(), mComponentPools.end(),
-                                       [=](const auto& id_pool){ return id_pool.first == component; });
-            iterator->second.Remove(entity);
-            mRegistryMeta.RemoveComponent(entity, component);
-         }
-      }
-
-      bool Registry::HasComponent(Entity entity, std::string_view component_name)
-      {
-         if (entity == iNVALID_ENTITY)
-            throw std::runtime_error("Has component: invalid entity"); 
-            
-         auto component = mRegistryMeta.CheckComponentPoolName(component_name);
-         return mRegistryMeta.HasComponent(entity, component);
-      }
-
       Pool& Registry::GetComponentPool(ComponentTypeID id)
       {
          auto iterator = std::find_if(mComponentPools.begin(), mComponentPools.end(), 
@@ -55,16 +34,24 @@ namespace recs
 
       void Registry::CloneInto(Registry& registry)
       {
+         // clone 
          registry.mRegistryMeta = mRegistryMeta;
-         for (auto& [entity, components] : registry.mRegistryMeta.mEntityComponentsMeta)
-            entity.mRegistry = &registry;
-
+         
          for (const auto& [id, pool] : mComponentPools)
+            registry.mComponentPools.emplace(std::make_pair(id, pool.Clone()));
+         
+         // rewrite pointers
+         std::unordered_map<Entity, std::vector<ComponentTypeID>> map;
+         for (std::pair<Entity,std::vector<ComponentTypeID>> entity_components : registry.mRegistryMeta.mEntityComponentsMeta)
          {
-            registry.mComponentPools.push_back(std::make_pair(id, pool.Clone()));
-            for (auto& entity : registry.mComponentPools.back().second.mEntities)
-               entity.mRegistry = &registry;
+            entity_components.first.mRegistry = &registry;
+            map.emplace(std::move(entity_components));
          }
+         registry.mRegistryMeta.mEntityComponentsMeta = std::move(map);
+
+         for (auto& [type_id, pool] : registry.mComponentPools)
+            for (auto& entity : pool.mEntities)
+               entity.mRegistry = &registry;
       }
 
 }

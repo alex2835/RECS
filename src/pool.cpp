@@ -32,6 +32,9 @@ namespace recs
 
       Pool::~Pool()
       {
+         if(!mDoDelete)
+            return;
+            
          for (uint32_t i = 0; i < mSize; i++)
             mDoDelete(GetElemAddress(i));
       }
@@ -42,10 +45,8 @@ namespace recs
          int position = iterator != mEntities.end() ? iterator - mEntities.begin() : mSize;
          
          mEntities.erase(iterator);
-
          mDoDelete(GetElemAddress(position));
          std::memmove(GetElemAddress(position), GetElemAddress(position + 1), mComponentSize * (mSize - position - 1));
-
          mSize--;
       }
 

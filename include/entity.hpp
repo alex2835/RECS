@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <string_view>
-
+#include <functional>
 namespace recs
 {
    class Registry;
@@ -22,25 +22,24 @@ namespace recs
       bool operator <  (Entity other) const { return mID <  other.mID; }
 
    template <typename T, typename ...Args>
-   Entity AddComponet(std::string_view component_name, Args&& ...args)
-   {
-      mRegistry->template AddComponet<T>(*this, component_name, std::forward<Args>(args)...);
-      return *this;
-   }
+   Entity AddComponet(Args&& ...args);
 
    template <typename T>
-   T& GetComponent(std::string_view component_name)
-   {
-      return mRegistry->template GetComponent<T>(component_name);
-   }
+   T& GetComponent();
 
-   template <typename ...Args, int Size>
-   std::tuple<Args&...> GetComponents(std::string_view const(&component_names)[Size])
-   {
-      return mRegistry->template GetComponents<Args...>(*this, component_names);
-   }
+   template <typename T>
+   bool HasComponent();
 
-   Entity RemoveComponet(std::string_view component_name);
+   template <typename ...Components>
+   bool HasComponents();
+
+   template <typename ...Components>
+   std::tuple<Components&...> GetComponents();
+
+   template <typename T>
+   Entity RemoveComponet();
+   
+   operator uint32_t() const { return mID; };
 
    private:
       Entity(uint32_t id)
@@ -59,5 +58,16 @@ namespace recs
       friend class Registry;
    };
 
-   constexpr Entity iNVALID_ENTITY = {};
+   constexpr Entity INVALID_ENTITY = {};
+
 }
+
+
+   template<>
+   struct std::hash<recs::Entity>
+   {
+      std::size_t operator()(const recs::Entity& entity) const noexcept
+      {
+         return (uint32_t)entity;
+      }
+   };
