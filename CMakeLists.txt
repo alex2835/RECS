@@ -1,21 +1,26 @@
-cmake_minimum_required(VERSION 3.0.0)
-project(RECS VERSION 0.1.0)
+cmake_minimum_required(VERSION 3.16)
+project(resc VERSION 0.0.0)
 
-SET(SOURCE
+set(SOURCES
    "src/pool.cpp"
    "src/registry.cpp"
-   "src/registry_meta.cpp"
 )
 
-add_library(RECS STATIC ${SOURCE})
+add_library(resc STATIC ${SOURCES})
 
 target_include_directories(
-   RECS PUBLIC
-   "include"
+   resc PUBLIC
+   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 set_target_properties(
-   RECS PROPERTIES
-   CXX_STANDARD 17
+   resc PROPERTIES
+   CXX_STANDARD 23
    CXX_STANDARD_REQUIRED ON
 )
+
+
+set(RECS_TESTS TRUE)
+if(RECS_TESTS)
+	add_subdirectory(tests)
+endif()
