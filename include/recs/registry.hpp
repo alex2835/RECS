@@ -110,7 +110,9 @@ private:
     void ForEachTuple( F&& func );
     
     template <typename ...Args, size_t Size, size_t ...Is>
-    std::tuple<Args&...> MakeTupleFromPoolsAndIndicies( Pool* const( &pools )[Size], size_t const( &indicies )[Size], std::index_sequence<Is...> )
+    std::tuple<Args&...> MakeTupleFromPoolsAndIndicies( const std::array<Pool*, Size>& pools, 
+                                                        const std::array<size_t, Size>& indicies,
+                                                        std::index_sequence<Is...> )
     {
         return std::forward_as_tuple( pools[Is]->template Get<Args>( indicies[Is] )... );
     }
@@ -335,16 +337,16 @@ void Registry::ForEachTuple( F&& func )
         throw std::runtime_error( "No such components set: " +
               ( ( std::string( Components::Name() ) + ", " ) + ... ) );
 
-    const auto size = sizeof...( Components );
-    Pool* pools[size];
+    constexpr auto size = sizeof...( Components );
+    std::array<Pool*, size> pools;
 
     auto componentTypes = GetComponentsTypeId<Components...>();
-    int i = 0;
-    for ( auto componentType : componentTypes )
-        pools[i++] = &GetComponentPool( componentType );
+    for ( size_t i = 0; i < componentTypes.size(); i++ )
+        pools[i] = &GetComponentPool( componentTypes[i] );
 
     size_t max_id = 0;
-    size_t indicies[size] = { 0u };
+    std::array<size_t, size> indicies;
+    indicies.fill( 0u );
     while ( true )
     {
         for ( int i = 0; i < size; i++ )
