@@ -1,26 +1,27 @@
-cmake_minimum_required(VERSION 3.16)
-project(resc VERSION 0.0.0)
+cmake_minimum_required(VERSION 3.18)
+project(recs VERSION 0.1.0)
+set(CMAKE_CXX_STANDARD 23)
 
-set(SOURCES
+SET(SOURCE
    "src/pool.cpp"
    "src/registry.cpp"
 )
 
-add_library(resc STATIC ${SOURCES})
+add_library(recs STATIC ${SOURCE})
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+	target_compile_options(recs PUBLIC
+		/WX
+	)
+endif()
+add_definitions(-DBUILDING_RECS)
 
-target_include_directories(
-   resc PUBLIC
+target_include_directories(recs PUBLIC
    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-set_target_properties(
-   resc PROPERTIES
-   CXX_STANDARD 23
-   CXX_STANDARD_REQUIRED ON
-)
-
-
-set(RECS_TESTS TRUE)
-if(RECS_TESTS)
-	add_subdirectory(tests)
+option(RECS_TEST "" OFF)
+if( RECS_TEST )
+	add_definitions(-DRECS_STATIC)
+	add_executable(recs_test tests/test.cpp)
+	target_link_libraries(recs_test recs)
 endif()

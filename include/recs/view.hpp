@@ -1,69 +1,118 @@
 #pragma once
-#include <stdexcept>
+#include <tuple>
+#include <array>
 #include "recs/impex.hpp"
 #include "recs/utils.hpp"
-#include "recs/entity.hpp"
+#include "recs/pool.hpp"
 
 namespace recs
 {
+
+// Zero-allocation lazy view. Stores only pool pointers (stack) and runs the
+// merge-join one step per iterator increment — no heap allocation.
+// Invariant: pool pointers are invalidated if new component types are
+// registered while the view is alive (unordered_map rehash).
 template<ComponentType ...Components>
 class RECS_EXPORT View
 {
+    static constexpr size_t N = sizeof...( Components );
+
 public:
-    template <typename F>
-    void ForEach( F&& func )
-    {
-        for ( auto& components : mComponents )
-            std::apply( std::forward<F>( func ), components );
-    }
+    struct Sentinel {};
 
-    std::tuple<Components&...> Get( Entity entity )
+    class Iterator
     {
-        auto iterator = std::find( begin(), end(), entity );
-        if ( iterator == end() )
-            throw std::runtime_error( "View::Get - Invalid entity" );
-        return *iterator;
-    }
+    public:
+        Iterator() = default;
 
-    std::tuple<Components&...> Get( size_t pos )
-    {
-        return mComponents[pos];
-    }
+        explicit Iterator( std::array<Pool*, N> pools )
+            : mPools( pools )
+        {
+            mIndices.fill( 0 );
+            for ( auto p : mPools )
+                if ( !p ) 
+                    return;
+            mAtEnd = false;
+            advance();
+        }
 
+        // Returns references directly into pool storage — no copies.
+        std::tuple<Components&...> operator*() const
+        {
+            return makeResult( std::make_index_sequence<N>{} );
+        }
+
+        Iterator& operator++()
+        {
+            for ( size_t i = 0; i < N; i++ )
+                mIndices[i]++;
+            advance();
+            return *this;
+        }
+
+        bool operator==( const Sentinel& ) const { return mAtEnd; }
+        bool operator!=( const Sentinel& ) const { return !mAtEnd; }
+
+    private:
+        void advance()
+        {
+            while ( !mAtEnd )
+            {
+                for ( size_t i = 0; i < N; i++ )
+                    if ( mIndices[i] >= mPools[i]->Size() ) { mAtEnd = true; return; }
+
+                size_t max_id = 0;
+                for ( size_t i = 0; i < N; i++ )
+                    max_id = std::max( max_id, (size_t)mPools[i]->mEntities[mIndices[i]] );
+
+                bool found = true;
+                for ( size_t i = 0; i < N; i++ )
+                {
+                    while ( mIndices[i] < mPools[i]->Size() &&
+                            (size_t)mPools[i]->mEntities[mIndices[i]] < max_id )
+                        mIndices[i]++;
+                    if ( mIndices[i] >= mPools[i]->Size() ) { mAtEnd = true; return; }
+                    if ( (size_t)mPools[i]->mEntities[mIndices[i]] != max_id )
+                    {
+                        found = false;
+                        break;
+                    }
+                }
+
+                if ( found ) return;
+            }
+        }
+
+        template<size_t ...Is>
+        std::tuple<Components&...> makeResult( std::index_sequence<Is...> ) const
+        {
+            return std::forward_as_tuple(
+                mPools[Is]->template Get<std::tuple_element_t<Is, std::tuple<Components...>>>( mIndices[Is] )...
+            );
+        }
+
+        std::array<Pool*, N> mPools    = {};
+        std::array<size_t, N> mIndices = {};
+        bool mAtEnd = true;
+    };
+
+    View() = default;
+    explicit View( std::array<Pool*, N> pools ) : mPools( pools ) {}
+
+    Iterator begin() { return Iterator( mPools ); }
+    Sentinel end()   { return {}; }
+
+    // O(n) — traverses the full result set.
     size_t Size()
     {
-        return mEntities.size();
-    }
-
-    auto& GetEntities()
-    {
-        return mEntities;
-    }
-
-    auto& GetComponets()
-    {
-        return mComponents;
-    }
-
-    auto begin()
-    {
-        return mComponents.begin();
-    }
-    auto end()
-    {
-        return mComponents.end();
+        size_t n = 0;
+        for ( auto it = begin(); it != end(); ++it )
+            n++;
+        return n;
     }
 
 private:
-    View( std::vector<Entity>&& entities,
-          std::vector<std::tuple<Components&...>>&& components )
-        : mEntities( std::move( entities ) ),
-          mComponents( std::move( components ) )
-    {}
-
-    std::vector<Entity> mEntities;
-    std::vector<std::tuple<Components&...>> mComponents;
-    friend class Registry;
+    std::array<Pool*, N> mPools = {};
 };
 
-}
+} // namespace recs

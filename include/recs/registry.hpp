@@ -1,18 +1,21 @@
 #pragma once
 #include <unordered_map>
 #include <unordered_set>
+#include <bitset>
+#include <set>
 #include <string_view>
 #include <format>
 #include <string>
 #include <array>
 #include <tuple>
 #include <ranges>
+#include <cassert>
+#include <stdexcept>
 #include "recs/impex.hpp"
 #include "recs/utils.hpp"
 #include "recs/entity.hpp"
 #include "recs/pool.hpp"
 #include "recs/view.hpp"
-#include "recs/runtime_view.hpp"
 
 namespace recs
 {
@@ -20,42 +23,47 @@ class RECS_EXPORT Registry
 {
 public:
     Registry() = default;
-    
-    // Not copyable and movable because entities refer to registry
-    Registry( const Registry& ) = delete;
-    Registry& operator=( const Registry& ) = delete;
-    Registry( Registry&& ) = delete;
-    Registry& operator=( Registry&& ) = delete;
+    Registry( const Registry& ) = default;
+    Registry& operator=( const Registry& ) = default;
+    Registry( Registry&& ) = default;
+    Registry& operator=( Registry&& ) = default;
 
     Entity CreateEntity();
+    Entity CreateEntityWithId( size_t id );
     Entity GetEntityById( size_t id );
-    void RemoveEntity( Entity& entity );
+    void RemoveEntity( Entity entity );
+    Entity CopyEntity( Entity entity );
+    Entity CopyEntityInto( Registry& targetRegistry, Entity entity );
+    Entity CopyEntityIntoWithId( Registry& targetRegistry, Entity entity, size_t targetId );
 
     // Component types API
     template <ComponentType Component>
-    Registry& AddComponet();
+    Registry& AddComponent();
 
     template <ComponentType Component, typename ...Args>
-    Registry& AddComponet( Entity entity, Args&& ...args );
+    Component& AddComponent( Entity entity, Args&& ...args );
 
     template <ComponentType Component>
     Component& GetComponent( Entity entity );
+
+    template <ComponentType Component>
+    const Component& GetComponent( Entity entity ) const;
 
     template <ComponentType ...Components>
     std::tuple<Components&...> GetComponents( Entity entity );
 
     template <ComponentType Component>
-    bool HasComponent( Entity entity );
+    bool HasComponent( Entity entity ) const;
 
     template <ComponentType ...Components>
-    bool HasComponents( Entity entity );
+    bool HasComponents( Entity entity ) const;
 
     template <ComponentType Component>
     void RemoveComponent( Entity entity );
     
     // ComponentTypeIds API
-    const std::unordered_map<std::string, ComponentTypeId, string_hash, std::equal_to<>>& AllComponentTypeIdsMap();
-    const std::unordered_set<ComponentTypeId>& EntityComponentTypeIds( Entity entity );
+    const std::set<ComponentTypeId>& AllComponentTypeIds() const;
+    const std::set<ComponentTypeId>& EntityComponentTypeIds( Entity entity ) const;
     void EntityAddComponentId( Entity entity, ComponentTypeId componentId );
     void EntityRemoveComponentId( Entity entity, ComponentTypeId componentId );
 
@@ -63,239 +71,181 @@ public:
     template <ComponentType ...Components, typename F>
     void ForEach( F&& func );
 
-    template <typename F>
-    void RuntimeForEach( const std::vector<std::string_view>& components, F&& func );
+    template <ComponentType ...Components, typename F>
+    void ForEach( F&& func ) const;
+
+    // For each on provided components Ids
+    // If id is INVALID_COMPONENT_TYPE_ID(=-1) this component will be
+    // skipped while iteration and filled just with nullptr
+    template <size_t SIZE, typename F>
+    void RuntimeForEach( const std::array<ComponentTypeId, SIZE>& components, F&& func );
+
+    template <ComponentType ...Components>
+    View<Components...> GetView();
 
     template <typename F>
     void ForEachEntity( F&& func );
 
-    template <ComponentType ...Components>
-    View<Components...> GetView();
-    RuntimeView GetRuntimeView( const std::vector<std::string_view>& components );
+    template <typename F>
+    void ForEachEntity( F&& func ) const;
 
     template <typename F>
     void ForEachEntityComponentRaw( Entity entity, F&& func );
 
-    void UpdateEntityReferences();
-    void CloneInto( Registry& );
+    size_t Size() const noexcept
+    {
+        return mEntitiesComponentTypeIds.size();
+    }
 
 private:
-    // Component ids management
-    template <ComponentType Component>
-    ComponentTypeId AddComponentTypeId();
+    Pool& GetPool( ComponentTypeId componentId );
 
     template <ComponentType Component>
-    ComponentTypeId GetComponentTypeId();
-    ComponentTypeId GetComponentTypeId( std::string_view name );
-
-    template <ComponentType ...Components>
-    std::array<ComponentTypeId, sizeof...(Components)> GetComponentsTypeId();
-
-    template <ComponentType Component>
-    bool HasComponentTypeId();
-
-    template <ComponentType ...Components>
-    bool HasComponentsTypeId();
-
-    template <ComponentType Component>
-    Component& EntityGetComponent( Entity entity, ComponentTypeId component );
+    Component& EntityGetComponent( Entity entity );
 
     void EntityAddComponent( Entity entity, ComponentTypeId component );
-    bool EntityHasComponent( Entity entity, ComponentTypeId component );
+    bool EntityHasComponent( Entity entity, ComponentTypeId component ) const;
     void EntityRemoveComponent( Entity entity, ComponentTypeId component );
-    std::unordered_set<ComponentTypeId>& GetEntityComponentsIds( Entity entity );
+    std::set<ComponentTypeId>& GetEntityComponentsIds( Entity entity );
 
     // For each
     template <ComponentType ...Components, typename F>
     void ForEachTuple( F&& func );
-    
+
+    template <ComponentType ...Components, typename F>
+    void ForEachTuple( F&& func ) const;
+
     template <typename ...Args, size_t Size, size_t ...Is>
-    std::tuple<Args&...> MakeTupleFromPoolsAndIndicies( const std::array<Pool*, Size>& pools, 
-                                                        const std::array<size_t, Size>& indicies,
-                                                        std::index_sequence<Is...> )
+    std::tuple<const Args&...> MakeTupleFromPoolsAndIndiciesConst( const std::array<const Pool*, Size>& pools,
+                                                                   const std::array<size_t, Size>& indicies,
+                                                                   std::index_sequence<Is...> ) const
     {
         return std::forward_as_tuple( pools[Is]->template Get<Args>( indicies[Is] )... );
     }
+
     Pool& GetComponentPool( ComponentTypeId id );
-    Pool& GetComponentPool( std::string_view component );
+    const Pool& GetComponentPool( ComponentTypeId id ) const;
 
 protected:
     size_t mEntityCounter = 1;
-    size_t mComponentCounter = 1;
-    std::unordered_map<std::string, ComponentTypeId, string_hash, std::equal_to<>> mComponents;
-    std::unordered_map<Entity, std::unordered_set<ComponentTypeId>> mEntitiesComponentTypeIds;
+    std::set<ComponentTypeId> mComponents;
+    std::unordered_map<Entity, std::set<ComponentTypeId>> mEntitiesComponentTypeIds;
     std::unordered_map<ComponentTypeId, Pool> mPools;
 };
 
 
-// Component ids
-
-template <ComponentType Component>
-ComponentTypeId Registry::GetComponentTypeId()
-{
-    auto iter = mComponents.find( Component::Name() );
-    if ( iter == mComponents.end() )
-        return INVALID_COMPONENT_TYPE;
-    return iter->second;
-}
-
-template <ComponentType Component>
-ComponentTypeId Registry::AddComponentTypeId()
-{
-    auto iter = mComponents.find( Component::Name() );
-    if ( iter == mComponents.end() )
-    {
-        auto id = mComponentCounter++;
-        mComponents[std::string( Component::Name() )] = id;
-        return id;
-    }
-    return iter->second;
-}
+// ------------------------ Component IDs ------------------------
 
 template <ComponentType ...Components>
-std::array<ComponentTypeId, sizeof...(Components)> Registry::GetComponentsTypeId()
+std::array<ComponentTypeId, sizeof...( Components )> GetComponentsTypeId()
 {
-    return { GetComponentTypeId<Components>()... };
+    return { Components::ID()... };
 }
 
 template <ComponentType Component>
-bool Registry::HasComponentTypeId()
+Component& Registry::EntityGetComponent( Entity entity )
 {
-    return mComponents.count( Component::Name() );
-}
-
-template <ComponentType ...Components>
-bool Registry::HasComponentsTypeId()
-{
-    return ( HasComponentTypeId<Components>() && ... );
-}
-
-template <ComponentType Component>
-Component& Registry::EntityGetComponent( Entity entity, ComponentTypeId component )
-{
-    Pool& pool = GetComponentPool( component );
+    Pool& pool = GetComponentPool( Component::ID() );
     return pool.Get<Component>( entity );
 }
 
 
-// Registry
+// ------------------------ Registry ------------------------
 
 template <ComponentType Component>
-Registry& Registry::AddComponet()
+Registry& Registry::AddComponent()
 {
-    ComponentTypeId componentType = GetComponentTypeId<Component>();
-    if ( componentType == INVALID_COMPONENT_TYPE )
-    {
-        componentType = AddComponentTypeId<Component>();
-        mPools.emplace( componentType, Pool::CreatePool<Component>() );
-    }
+    if ( mComponents.emplace( Component::ID() ).second )
+        mPools.emplace( Component::ID(), Pool::CreatePool<Component>() );
     return *this;
 }
 
 template <ComponentType Component, typename ...Args>
-Registry& Registry::AddComponet( Entity entity, Args&& ...args )
+Component& Registry::AddComponent( Entity entity, Args&& ...args )
 {
     if ( entity == INVALID_ENTITY )
-        throw std::runtime_error( "Add component: invalid entity" );
+        throw std::runtime_error( "AddComponent: Invalid entity" );
 
-    ComponentTypeId componentType = GetComponentTypeId<Component>();
-    if ( componentType == INVALID_COMPONENT_TYPE )
+    if ( mComponents.emplace( Component::ID() ).second )
+        mPools.emplace( Component::ID(), Pool::CreatePool<Component>() );
+
+    if ( EntityHasComponent( entity, Component::ID() ) )
     {
-        componentType = AddComponentTypeId<Component>();
-        mPools.emplace( componentType, Pool::CreatePool<Component>() );
-    }
-    if ( EntityHasComponent( entity, componentType ) )
-    {
-        auto& component = EntityGetComponent<Component>( entity, componentType );
+        auto& component = EntityGetComponent<Component>( entity );
         component = Component( std::forward<Args>( args )... );
+        return component;
     }
     else
     {
-        EntityAddComponent( entity, componentType );
-        Pool& pool = mPools[componentType];
-        pool.Push<Component>( entity, std::forward<Args>( args )... );
+        EntityAddComponent( entity, Component::ID() );
+        Pool& pool = mPools[Component::ID()];
+        auto& component = pool.Push<Component>( entity, std::forward<Args>( args )... );
+        return component;
     }
-    return *this;
 }
 
 template <ComponentType Component>
 Component& Registry::GetComponent( Entity entity )
 {
-    if ( entity == INVALID_ENTITY )
-        throw std::runtime_error( "Get component: invalid entity" );
+    if ( !HasComponent<Component>( entity ) )
+        throw std::runtime_error( std::format( "GetComponent: Entity {} doesn't have component {}", (size_t)entity, Component::ID() ) );
 
-    ComponentTypeId componentType = GetComponentTypeId<Component>();
-    if ( componentType != INVALID_COMPONENT_TYPE )
-    {
-        Pool& pool = GetComponentPool( componentType );
-        return pool.Get<Component>( entity );
-    }
-    throw std::runtime_error( "Entity doesn't have such a component " );
+    Pool& pool = GetComponentPool( Component::ID() );
+    return pool.Get<Component>( entity );
+}
+
+template <ComponentType Component>
+const Component& Registry::GetComponent( Entity entity ) const
+{
+    return const_cast<Registry*>( this )->GetComponent<Component>( entity );
 }
 
 template <ComponentType ...Components>
 std::tuple<Components&...> Registry::GetComponents( Entity entity )
 {
-    if ( entity == INVALID_ENTITY )
-        throw std::runtime_error( "Get component: invalid entity" );
+    if ( !HasComponents<Components...>( entity ) )
+        throw std::runtime_error( std::format( "GetComponents: Entity {} doesn't have required components", (size_t)entity ) );
 
     return std::forward_as_tuple( GetComponent<Components>( entity )... );
 }
 
 template <ComponentType Component>
-bool Registry::HasComponent( Entity entity )
+bool Registry::HasComponent( Entity entity ) const
 {
     if ( entity == INVALID_ENTITY )
-        throw std::runtime_error( "Has component: invalid entity" );
+        throw std::runtime_error( "HasComponent: Invalid entity" );
 
-    auto componentId = GetComponentTypeId<Component>();
-    if( componentId == INVALID_COMPONENT_TYPE )
-        throw std::runtime_error( "HasComponent: invalid component type:" +
-                                  std::string( Component::Name() ) );
-
-    return EntityHasComponent( entity, componentId );
+    return EntityHasComponent( entity, Component::ID() );
 }
 
 template <ComponentType ...Components>
-bool Registry::HasComponents( Entity entity )
+bool Registry::HasComponents( Entity entity ) const
 {
     if ( entity == INVALID_ENTITY )
-        throw std::runtime_error( "Has components: invalid entity" );
+        throw std::runtime_error( "HasComponents: Invalid entity" );
 
-    return ( EntityHasComponent( entity, GetComponentTypeId<Components>() ) && ... );
+    return ( EntityHasComponent( entity, Components::ID() ) && ... );
 }
 
 
 template <ComponentType Component>
 void Registry::RemoveComponent( Entity entity )
 {
-    ComponentTypeId component = GetComponentTypeId<Component>();
-    if ( EntityHasComponent( entity, component ) )
+    if ( entity == INVALID_ENTITY )
+        throw std::runtime_error( "RemoveComponent: Invalid entity" );
+
+    //ComponentTypeId component = GetComponentTypeId<Component>();
+    if ( EntityHasComponent( entity, Component::ID() ) )
     {
-        Pool& pool = mPools[component];
+        Pool& pool = mPools[Component::ID()];
         pool.Remove( entity );
-        EntityRemoveComponent( entity, component );
+        EntityRemoveComponent( entity, Component::ID() );
     }
 }
 
 
-// For each
 
-template <ComponentType ...Components>
-View<Components...> Registry::GetView()
-{
-    std::vector<Entity> entities;
-    std::vector<std::tuple<Components&...>> components;
-    entities.reserve( 10 );
-    components.reserve( 10 );
-
-    ForEachTuple<Components...>( [&]( Entity entity, std::tuple<Components&...> comps )
-    {
-        entities.push_back( entity );
-        components.push_back( comps );
-    } );
-    return View<Components...>( std::move( entities ), std::move( components ) );
-}
+// ------------------------ ForEach ------------------------
 
 template <typename F>
 void Registry::ForEachEntityComponentRaw( Entity entity, F&& func )
@@ -303,15 +253,27 @@ void Registry::ForEachEntityComponentRaw( Entity entity, F&& func )
     if ( entity == INVALID_ENTITY )
         throw std::runtime_error( "ForEachEntityComponentRaw: Invalid entity" );
 
-    const auto& components = mEntitiesComponentTypeIds[entity];
-    for ( const auto& [name, id] : mComponents )
+    auto entityIter = mEntitiesComponentTypeIds.find( entity );
+    if ( entityIter == mEntitiesComponentTypeIds.end() )
+        return;
+    const auto& components = entityIter->second;
+    for ( const auto id : mComponents )
     {
         if ( components.count( id ) )
         {
             Pool& pool = mPools[id];
-            func( name, pool.GetRaw( entity ) );
+            func( id, pool.GetRaw( entity ) );
         }
     }
+}
+
+template <ComponentType ...Components, typename F>
+void Registry::ForEach( F&& func ) const
+{
+    ForEachTuple<Components...>( [&func]( Entity entity, std::tuple<const Components&...> components )
+    {
+        std::apply( std::forward<F>( func ), std::tuple_cat( std::make_tuple( entity ), components ) );
+    } );
 }
 
 template <ComponentType ...Components, typename F>
@@ -324,27 +286,32 @@ void Registry::ForEach( F&& func )
 }
 
 template <typename F>
-void Registry::ForEachEntity( F&& func )
+void Registry::ForEachEntity( F&& func ) const
 {
     for ( const auto& [entity, _] : mEntitiesComponentTypeIds )
         func( entity );
 }
 
-template <ComponentType ...Components, typename F>
-void Registry::ForEachTuple( F&& func )
+template <typename F>
+void Registry::ForEachEntity( F&& func )
 {
-    if ( !HasComponentsTypeId<Components...>() )
-        throw std::runtime_error( "No such components set: " +
-              ( ( std::string( Components::Name() ) + ", " ) + ... ) );
+    std::as_const( *this ).ForEachEntity( std::forward<F>( func ) );
+}
+
+template <ComponentType ...Components, typename F>
+void Registry::ForEachTuple( F&& func ) const
+{
+    if ( !( mComponents.contains( Components::ID() ) && ... ) )
+        return;
 
     constexpr auto size = sizeof...( Components );
-    std::array<Pool*, size> pools;
+    std::array<const Pool*, size> pools;
 
     auto componentTypes = GetComponentsTypeId<Components...>();
     for ( size_t i = 0; i < componentTypes.size(); i++ )
         pools[i] = &GetComponentPool( componentTypes[i] );
 
-    size_t max_id = 0;
+    size_t maxId = 0;
     std::array<size_t, size> indicies;
     indicies.fill( 0u );
     while ( true )
@@ -354,123 +321,150 @@ void Registry::ForEachTuple( F&& func )
             if ( indicies[i] >= pools[i]->Size() )
                 return;
 
-            if ( max_id < pools[i]->mEntities[indicies[i]].mId )
-                max_id = pools[i]->mEntities[indicies[i]].mId;
+            if ( maxId < pools[i]->mEntities[indicies[i]].mId )
+                maxId = pools[i]->mEntities[indicies[i]].mId;
         }
 
-        bool next = false;
+        bool skip = false;
         for ( int i = 0; i < size; i++ )
         {
-            while ( pools[i]->mEntities[indicies[i]].mId < max_id )
+            while ( pools[i]->mEntities[indicies[i]].mId < maxId )
             {
-                if ( pools[i]->mEntities[indicies[i]].mId > max_id )
-                {
-                    next = true;
-                    break;
-                }
-
                 indicies[i]++;
                 if ( indicies[i] >= pools[i]->Size() )
                     return;
             }
+            if ( pools[i]->mEntities[indicies[i]].mId > maxId )
+            {
+                skip = true;
+                break;
+            }
         }
-        if ( next ) 
+        if ( skip )
             continue;
 
-        Entity entity( max_id, this );
-        auto tuple = MakeTupleFromPoolsAndIndicies<Components...>( pools, indicies, std::make_index_sequence<size>{} );
-        func( entity, tuple );
+        func( Entity( maxId ), MakeTupleFromPoolsAndIndiciesConst<Components...>( pools, indicies, std::make_index_sequence<size>{} ) );
 
         for ( int i = 0; i < size; i++ )
             indicies[i]++;
     }
 }
 
-template <typename F>
-void Registry::RuntimeForEach( const std::vector<std::string_view>& components, F&& func )
+template <size_t SIZE, typename F>
+void Registry::RuntimeForEach( const std::array<ComponentTypeId, SIZE>& componentIds, F&& func )
 {
-    std::vector<Pool*> pools( components.size() );
-    for ( size_t i = 0; i < components.size(); i++ )
-        pools[i] = &GetComponentPool( components[i] );
+    // valid set of components
+    std::bitset<SIZE> validBS;
+    for ( size_t i = 0; i < SIZE; i++ )
+        validBS.set( i, componentIds[i] != INVALID_COMPONENT_TYPE_ID );
 
-    size_t max_id = 0;
-    std::vector<size_t> indicies( components.size(), 0u );
+    // pools
+    std::array<Pool*, SIZE> pools;
+    pools.fill( nullptr );
+    for ( size_t i = 0; i < SIZE; i++ )
+    {
+        if ( validBS.test( i ) )
+            pools[i] = &GetComponentPool( componentIds[i] );
+    }
+
+    std::array<size_t, SIZE> indicies;
+    indicies.fill( 0 );
+
+    size_t maxId = 0;
     while ( true )
     {
-        for ( size_t i = 0; i < components.size(); i++ )
+        // update max entity id
+        for ( size_t i = 0; i < SIZE; i++ )
         {
-            if ( indicies[i] >= pools[i]->Size() )
+            if ( not validBS.test( i ) )
+                continue;
+
+            const auto& pool = pools[i];
+            auto& entityIndex = indicies[i];
+
+            if ( entityIndex >= pool->Size() )
                 return;
 
-            if ( max_id < pools[i]->mEntities[indicies[i]].mId )
-                max_id = pools[i]->mEntities[indicies[i]].mId;
+            const auto& poolEntities = pool->mEntities;
+            if ( maxId < poolEntities[entityIndex].mId )
+                maxId = poolEntities[entityIndex].mId;
         }
 
-        bool next = false;
-        for ( size_t i = 0; i < components.size(); i++ )
+        // find indices in pools of max entity id
+        bool skip = false;
+        for ( size_t i = 0; i < SIZE; i++ )
         {
-            while ( pools[i]->mEntities[indicies[i]].mId < max_id )
-            {
-                if ( pools[i]->mEntities[indicies[i]].mId > max_id )
-                {
-                    next = true;
-                    break;
-                }
+            if ( not validBS.test( i ) )
+                continue;
 
-                indicies[i]++;
-                if ( indicies[i] >= pools[i]->Size() )
+            const auto& pool = pools[i];
+            const auto& poolEntities = pool->mEntities;
+            auto& entityIndex = indicies[i];
+
+            while ( poolEntities[entityIndex].mId < maxId )
+            {
+                entityIndex++;
+                if ( entityIndex >= pool->Size() )
                     return;
             }
+            if ( poolEntities[entityIndex].mId > maxId )
+            {
+                skip = true;
+                break;
+            }
         }
-        if ( next )
+        if ( skip )
             continue;
 
-        func( Entity( max_id, this ) );
 
-        for ( int i = 0; i < components.size(); i++ )
+        // Fill components pointers
+        std::array<void*, SIZE> components;
+        components.fill( nullptr );
+
+        for ( size_t i = 0; i < SIZE; i++ )
+        {
+            if ( validBS.test( i ) )
+                components[i] = pools[i]->GetElemAddress( indicies[i] );
+        }
+
+        // Call functor callback
+        func( Entity( maxId ), components );
+
+        for ( int i = 0; i < componentIds.size(); i++ )
             indicies[i]++;
     }
 }
 
-
-// Entity
-
-template <ComponentType Component, typename ...Args>
-Entity Entity::AddComponet( Args&& ...args )
+template <ComponentType ...Components, typename F>
+void Registry::ForEachTuple( F&& func )
 {
-    mRegistry->template AddComponet<Component>( *this, std::forward<Args>( args )... );
-    return *this;
-}
-
-template <ComponentType Component>
-Component& Entity::GetComponent()
-{
-    return mRegistry->template GetComponent<Component>( *this );
-}
-
-template <ComponentType Component>
-bool Entity::HasComponent()
-{
-    return mRegistry->template HasComponent<Component>( *this );
+    std::as_const( *this ).ForEachTuple<Components...>(
+        [&func]( Entity entity, std::tuple<const Components&...> components )
+        {
+            [&]<size_t ...Is>( std::index_sequence<Is...> )
+            {
+                func( entity, std::tuple<Components&...>(
+                    const_cast<Components&>( std::get<Is>( components ) )...
+                ) );
+            }( std::make_index_sequence<sizeof...( Components )>{} );
+        }
+    );
 }
 
 template <ComponentType ...Components>
-bool Entity::HasComponents()
+View<Components...> Registry::GetView()
 {
-    return mRegistry->template HasComponents<Components...>( *this );
-}
-
-template <ComponentType ...Components>
-std::tuple<Components&...> Entity::GetComponents()
-{
-    return mRegistry->template GetComponents<Components...>( *this );
-}
-
-template <ComponentType Component>
-Entity Entity::RemoveComponent()
-{
-    mRegistry->RemoveComponent<Component>( *this );
-    return *this;
+    constexpr size_t N = sizeof...( Components );
+    std::array<ComponentTypeId, N> ids = { Components::ID()... };
+    std::array<Pool*, N> pools;
+    for ( size_t i = 0; i < N; i++ )
+    {
+        auto it = mPools.find( ids[i] );
+        if ( it == mPools.end() )
+            return View<Components...>();
+        pools[i] = &it->second;
+    }
+    return View<Components...>( pools );
 }
 
 }

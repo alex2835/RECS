@@ -38,7 +38,7 @@ public:
     }
 
     Pool( const Pool& );
-    Pool& operator=( const Pool& ) = delete;
+    Pool& operator=( const Pool& );
     Pool( Pool&& ) = default;
     Pool& operator=( Pool&& ) = default;
     ~Pool();
@@ -53,7 +53,13 @@ public:
     T& Get( Entity entity );
 
     template <ComponentType T>
+    const T& Get( Entity entity ) const;
+
+    template <ComponentType T>
     T& Get( size_t index );
+
+    template <ComponentType T>
+    const T& Get( size_t index ) const;
 
     size_t Size() const noexcept;
 
@@ -63,7 +69,6 @@ public:
     const void* GetRaw( Entity entity ) const;
     const void* GetRaw( size_t index ) const;
 
-    Pool Clone() const;
 
 private:
     Pool( size_t component_size,
@@ -71,9 +76,13 @@ private:
           void( *delete_func )( void* ),
           void( *copy_func )( const void*, void* ) );
 
+    void Clone( Pool& pool ) const;
     void Realloc( size_t new_capacity );
     void* GetElemAddress( size_t size );
     const void* GetElemAddressConst( size_t size ) const;
+
+    std::vector<Entity>::iterator BFind( Entity entity );
+    std::vector<Entity>::const_iterator BFind( Entity entity ) const;
 
 public:
     size_t mSize = 0;
@@ -98,11 +107,14 @@ T& Pool::Push( Entity entity, Args&& ...args )
     if ( mCapacity <= mSize + 1 )
         Realloc( 2 * mSize + 1 );
 
+    size_t position = mSize;
     auto iterator = std::lower_bound( mEntities.begin(), mEntities.end(), entity );
-    size_t position = iterator != mEntities.end() ? iterator - mEntities.begin() : mSize;
-
+    if ( iterator != mEntities.end() )
+    {
+        position = iterator - mEntities.begin();
+        std::memmove( GetElemAddress( position + 1 ), GetElemAddress( position ), mComponentSize * ( mSize - position ) );
+    }
     mEntities.insert( iterator, entity );
-    std::memmove( GetElemAddress( position + 1 ), GetElemAddress( position ), mComponentSize * ( mSize - position ) );
     void* new_elem_mem = GetElemAddress( position );
     new( new_elem_mem ) T( std::forward<Args>( args )... );
 
@@ -116,7 +128,16 @@ T& Pool::Get( Entity entity )
     void* raw_data = GetRaw( entity );
     if ( raw_data )
         return *static_cast<T*>( raw_data );
-    throw std::runtime_error( "Entity has component, but pool doesn't (Incorrent working)" );
+    throw std::runtime_error( "Entity has component, but pool doesn't (Incorrect working)" );
+}
+
+template <ComponentType T>
+const T& Pool::Get( Entity entity ) const
+{
+    const void* raw_data = GetRaw( entity );
+    if ( raw_data )
+        return *static_cast<const T*>( raw_data );
+    throw std::runtime_error( "Entity has component, but pool doesn't (Incorrect working)" );
 }
 
 template <ComponentType T>
@@ -124,6 +145,14 @@ T& Pool::Get( size_t index )
 {
     if ( index < Size() )
         return *static_cast<T*>( GetElemAddress( index ) );
+    throw std::runtime_error( "Pool::Get, out of bound access" );
+}
+
+template <ComponentType T>
+const T& Pool::Get( size_t index ) const
+{
+    if ( index < Size() )
+        return *static_cast<const T*>( GetElemAddressConst( index ) );
     throw std::runtime_error( "Pool::Get, out of bound access" );
 }
 

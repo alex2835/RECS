@@ -16,22 +16,34 @@ Pool::Pool( size_t component_size,
     Realloc( 10 );
 }
 
-Pool Pool::Clone() const
+Pool::Pool( const Pool& other )
 {
-    Pool pool;
+    other.Clone( *this );
+}
+
+Pool& Pool::operator=( const Pool& other )
+{
+    if ( this != &other )
+        other.Clone( *this );
+    return *this;
+}
+
+void Pool::Clone( Pool& pool ) const
+{
     pool.mEntities = mEntities;
     pool.mDoInit = mDoInit;
     pool.mDoDelete = mDoDelete;
     pool.mDoCopy = mDoCopy;
 
     pool.mComponentSize = mComponentSize;
+    pool.mSize = 0;
     pool.Realloc( mCapacity );
-    pool.mSize = mSize;
 
-    for ( size_t i = 0; i < pool.mSize; i++ )
+    for ( size_t i = 0; i < mSize; i++ )
+    {
         pool.mDoCopy( GetElemAddressConst( i ), pool.GetElemAddress( i ) );
-
-    return pool;
+        pool.mSize++;
+    }
 }
 
 Pool::~Pool()
@@ -48,7 +60,7 @@ void* Pool::PushEmpty( Entity entity )
     if ( mCapacity <= mSize + 1 )
         Realloc( 2 * mSize + 1 );
 
-    auto iterator = std::lower_bound( mEntities.begin(), mEntities.end(), entity );
+    const auto iterator = std::lower_bound( mEntities.begin(), mEntities.end(), entity );
     size_t position = iterator != mEntities.end() ? iterator - mEntities.begin() : mSize;
 
     mEntities.insert( iterator, entity );
@@ -60,12 +72,24 @@ void* Pool::PushEmpty( Entity entity )
     return new_elem_address;
 }
 
+std::vector<Entity>::iterator Pool::BFind( Entity entity )
+{
+    auto it = std::lower_bound( mEntities.begin(), mEntities.end(), entity );
+    return ( it != mEntities.end() && *it == entity ) ? it : mEntities.end();
+}
+
+std::vector<Entity>::const_iterator Pool::BFind( Entity entity ) const
+{
+    auto it = std::lower_bound( mEntities.begin(), mEntities.end(), entity );
+    return ( it != mEntities.end() && *it == entity ) ? it : mEntities.end();
+}
+
 void Pool::Remove( Entity entity )
 {
-    auto iterator = std::lower_bound( mEntities.begin(), mEntities.end(), entity );
+    const auto iterator = BFind( entity );
     assert( iterator != mEntities.end() );
 
-    auto position = std::distance( mEntities.begin(), iterator );
+    const auto position = std::distance( mEntities.begin(), iterator );
     mEntities.erase( iterator );
     mDoDelete( GetElemAddress( position ) );
     std::memmove( GetElemAddress( position ), GetElemAddress( position + 1 ), mComponentSize * ( mSize - position - 1 ) );
@@ -79,12 +103,9 @@ size_t Pool::Size() const noexcept
 
 void* Pool::GetRaw( Entity entity )
 {
-    auto iterator = std::lower_bound( mEntities.begin(), mEntities.end(), entity );
+    const auto iterator = BFind( entity );
     if ( iterator != mEntities.end() )
-    {
-        auto position = std::distance( mEntities.begin(), iterator );
-        return GetElemAddress( position );
-    }
+        return GetElemAddress( std::distance( mEntities.begin(), iterator ) );
     return nullptr;
 }
 
@@ -107,13 +128,11 @@ const void* Pool::GetRaw( size_t index ) const
 
 void Pool::Realloc( size_t new_capacity )
 {
-    if ( mCapacity < new_capacity )
-    {
-        char* new_data = new char[new_capacity * mComponentSize];
-        memmove( new_data, mData.get(), mComponentSize * mSize );
-        mData.reset( new_data );
-        mCapacity = new_capacity;
-    }
+    char* new_data = new char[new_capacity * mComponentSize];
+    if ( mData )
+        std::memmove( new_data, mData.get(), mComponentSize * mSize );
+    mData.reset( new_data );
+    mCapacity = new_capacity;
 }
 
 void* Pool::GetElemAddress( size_t size )
@@ -125,4 +144,5 @@ const void* Pool::GetElemAddressConst( size_t size ) const
 {
     return &mData[mComponentSize * size];
 }
-}
+
+} // namespace recs
