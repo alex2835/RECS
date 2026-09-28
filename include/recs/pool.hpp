@@ -1,7 +1,10 @@
 #pragma once
 #include <memory>
 #include <mutex>
+#include <cstring>
+#include <span>
 #include <tuple>
+#include <type_traits>
 #include <vector>
 #include <algorithm>
 #include <unordered_map>
@@ -13,6 +16,17 @@ namespace recs
 {
 /**
  * @brief Store sorted components data
+ *
+ * Components are stored unboxed in one buffer, kept sorted by entity id. When
+ * the buffer grows or an insert or erase shifts it, a component is moved to
+ * its new slot and the old one destroyed; only trivially copyable types are
+ * moved bytewise. Standard containers are not safe to memmove: MSVC's checked
+ * iterators keep a pointer from a proxy back to the container, and libstdc++'s
+ * std::string points into itself.
+ *
+ * A component type needs a noexcept move constructor. One with only a copy
+ * constructor would be copied on every shift - for a deep copy, wrong as well
+ * as slow - so it does not compile.
  */
 class RECS_EXPORT Pool
 {
@@ -22,6 +36,12 @@ public:
     template <ComponentType T>
     static Pool CreatePool()
     {
+        // Realloc allocates with plain new[], which only guarantees alignment up
+        // to __STDCPP_DEFAULT_NEW_ALIGNMENT__. Fail loudly rather than handing
+        // back misaligned storage for an over-aligned (e.g. SIMD) component.
+        static_assert( alignof( T ) <= __STDCPP_DEFAULT_NEW_ALIGNMENT__,
+                       "recs: over-aligned component types are not supported" );
+
         auto init_func = []( void* component )
         {
             new ( component ) T();
@@ -34,13 +54,26 @@ public:
         {
             new ( to ) T( *static_cast<const T*>( from ) );
         };
-        return Pool( sizeof( T ), init_func, delete_func, copy_func );
+        static_assert( std::is_nothrow_move_constructible_v<T>,
+                       "recs: components are relocated by moving them; give the type a noexcept move constructor" );
+        // Null for a trivially copyable type: a memmove relocates it.
+        void( *relocate_func )( void*, void* ) = nullptr;
+        if constexpr ( !std::is_trivially_copyable_v<T> )
+        {
+            relocate_func = []( void* from, void* to )
+            {
+                T* source = static_cast<T*>( from );
+                new ( to ) T( std::move( *source ) );
+                source->~T();
+            };
+        }
+        return Pool( sizeof( T ), init_func, delete_func, copy_func, relocate_func );
     }
 
     Pool( const Pool& );
     Pool& operator=( const Pool& );
-    Pool( Pool&& ) = default;
-    Pool& operator=( Pool&& ) = default;
+    Pool( Pool&& ) noexcept;
+    Pool& operator=( Pool&& ) noexcept;
     ~Pool();
 
     template <ComponentType T, typename ...Args>
@@ -48,6 +81,11 @@ public:
     void* PushEmpty( Entity entity );
 
     void Remove( Entity entity );
+
+    // Batch erase. `entities` must be sorted ascending; ids that are not in this
+    // pool are ignored. Runs one compaction pass over the pool - O(Size()) total
+    // rather than a full tail shift per entity.
+    void Remove( std::span<const Entity> entities );
 
     template <ComponentType T>
     T& Get( Entity entity );
@@ -61,7 +99,26 @@ public:
     template <ComponentType T>
     const T& Get( size_t index ) const;
 
-    size_t Size() const noexcept;
+    // Defined in-class: these sit in the per-element hot loop of ForEach/View,
+    // where an out-of-line call costs more than the work they do.
+    size_t Size() const noexcept { return mSize; }
+
+    // Entities in this pool, sorted by id and parallel to the component
+    // storage: the component at index i belongs to Entities()[i].
+    const std::vector<Entity>& Entities() const noexcept { return mEntities; }
+
+    // Index of the first entity at or after `from` whose id is >= entityId,
+    // or Size() if there is none.
+    size_t AdvanceTo( size_t from, size_t entityId ) const noexcept
+    {
+        // Fast path: dense overlap, where the entry we want is already here.
+        // This is the common case and must stay inline and branch-predictable.
+        if ( from >= mSize || (size_t)mEntities[from] >= entityId )
+            return from;
+
+        // Sparse overlap: skipping a large gap costs O(log gap), not O(gap).
+        return GallopTo( from, entityId );
+    }
 
     void* GetRaw( Entity entity );
     void* GetRaw( size_t index );
@@ -74,17 +131,24 @@ private:
     Pool( size_t component_size,
           void( *init_func )( void* ),
           void( *delete_func )( void* ),
-          void( *copy_func )( const void*, void* ) );
+          void( *copy_func )( const void*, void* ),
+          void( *relocate_func )( void*, void* ) );
 
+    void Clear();
+    // Moves `count` components starting at `from` to raw storage at `to`,
+    // leaving raw storage behind. The ranges may overlap.
+    void Relocate( char* to, char* from, size_t count );
     void Clone( Pool& pool ) const;
     void Realloc( size_t new_capacity );
-    void* GetElemAddress( size_t size );
-    const void* GetElemAddressConst( size_t size ) const;
+    size_t GallopTo( size_t from, size_t entityId ) const noexcept;
+
+    void* GetElemAddress( size_t index ) { return &mData[mComponentSize * index]; }
+    const void* GetElemAddressConst( size_t index ) const { return &mData[mComponentSize * index]; }
 
     std::vector<Entity>::iterator BFind( Entity entity );
     std::vector<Entity>::const_iterator BFind( Entity entity ) const;
 
-public:
+private:
     size_t mSize = 0;
     size_t mCapacity = 0;
     size_t mComponentSize = 0;
@@ -94,6 +158,7 @@ public:
     void( *mDoInit )( void* component ) = nullptr;
     void( *mDoDelete )( void* component ) = nullptr;
     void( *mDoCopy )( const void* from, void* to ) = nullptr;
+    void( *mDoRelocate )( void* from, void* to ) = nullptr;
 
     friend class Registry;
 };
@@ -104,6 +169,16 @@ public:
 template <ComponentType T, typename ...Args>
 T& Pool::Push( Entity entity, Args&& ...args )
 {
+    // One slot per entity. Pushing an entity that is already here replaces its
+    // component instead of inserting a duplicate, which would silently corrupt
+    // the sorted merge-join that ForEach and View rely on.
+    if ( void* existing = GetRaw( entity ) )
+    {
+        mDoDelete( existing );
+        new ( existing ) T( std::forward<Args>( args )... );
+        return *static_cast<T*>( existing );
+    }
+
     if ( mCapacity <= mSize + 1 )
         Realloc( 2 * mSize + 1 );
 
@@ -112,7 +187,7 @@ T& Pool::Push( Entity entity, Args&& ...args )
     if ( iterator != mEntities.end() )
     {
         position = iterator - mEntities.begin();
-        std::memmove( GetElemAddress( position + 1 ), GetElemAddress( position ), mComponentSize * ( mSize - position ) );
+        Relocate( (char*)GetElemAddress( position + 1 ), (char*)GetElemAddress( position ), mSize - position );
     }
     mEntities.insert( iterator, entity );
     void* new_elem_mem = GetElemAddress( position );

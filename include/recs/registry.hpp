@@ -9,6 +9,9 @@
 #include <array>
 #include <tuple>
 #include <ranges>
+#include <span>
+#include <vector>
+#include <algorithm>
 #include <cassert>
 #include <stdexcept>
 #include "recs/impex.hpp"
@@ -31,10 +34,27 @@ public:
     Entity CreateEntity();
     Entity CreateEntityWithId( size_t id );
     Entity GetEntityById( size_t id );
+
+    // True if the entity is live in this registry, whatever components it
+    // holds. RemoveEntity and GetComponent assert or throw on anything else,
+    // so callers holding a handle of unknown age should ask first.
+    bool HasEntity( Entity entity ) const noexcept
+    {
+        return mEntitiesComponentTypeIds.contains( entity );
+    }
+
     void RemoveEntity( Entity entity );
+
+    // Batch erase. One compaction pass per pool instead of one tail shift per
+    // entity, which is what makes deleting a large selection O(n) not O(n*m).
+    void RemoveEntities( std::span<const Entity> entities );
     Entity CopyEntity( Entity entity );
     Entity CopyEntityInto( Registry& targetRegistry, Entity entity );
     Entity CopyEntityIntoWithId( Registry& targetRegistry, Entity entity, size_t targetId );
+    // One component of `entity` onto `targetEntity` in `targetRegistry`, which
+    // must not have that component yet. The pair of this and
+    // EntityRemoveComponentId is what an undoable "remove component" needs.
+    void CopyComponentInto( Registry& targetRegistry, Entity entity, ComponentTypeId componentId, Entity targetEntity );
 
     // Component types API
     template <ComponentType Component>
@@ -80,9 +100,6 @@ public:
     template <size_t SIZE, typename F>
     void RuntimeForEach( const std::array<ComponentTypeId, SIZE>& components, F&& func );
 
-    template <ComponentType ...Components>
-    View<Components...> GetView();
-
     template <typename F>
     void ForEachEntity( F&& func );
 
@@ -91,6 +108,11 @@ public:
 
     template <typename F>
     void ForEachEntityComponentRaw( Entity entity, F&& func );
+
+    // Lazy view over every entity holding all of Components. A component type
+    // that is not registered yields an empty view rather than throwing.
+    template <ComponentType ...Components>
+    View<Components...> GetView();
 
     size_t Size() const noexcept
     {
@@ -164,7 +186,7 @@ template <ComponentType Component, typename ...Args>
 Component& Registry::AddComponent( Entity entity, Args&& ...args )
 {
     if ( entity == INVALID_ENTITY )
-        throw std::runtime_error( "AddComponent: Invalid entity" );
+        throw std::runtime_error( std::format( "AddComponent<{}>: Invalid entity", ComponentName<Component>() ) );
 
     if ( mComponents.emplace( Component::ID() ).second )
         mPools.emplace( Component::ID(), Pool::CreatePool<Component>() );
@@ -187,11 +209,18 @@ Component& Registry::AddComponent( Entity entity, Args&& ...args )
 template <ComponentType Component>
 Component& Registry::GetComponent( Entity entity )
 {
-    if ( !HasComponent<Component>( entity ) )
-        throw std::runtime_error( std::format( "GetComponent: Entity {} doesn't have component {}", (size_t)entity, Component::ID() ) );
+    if ( entity == INVALID_ENTITY )
+        throw std::runtime_error( std::format( "GetComponent<{}>: Invalid entity", ComponentName<Component>() ) );
 
-    Pool& pool = GetComponentPool( Component::ID() );
-    return pool.Get<Component>( entity );
+    // The pool lookup already answers "does this entity have the component",
+    // so a HasComponent pre-check would just repeat the work. An unregistered
+    // type has no pool, which means no entity has it either.
+    auto poolIter = mPools.find( Component::ID() );
+    if ( poolIter != mPools.end() )
+        if ( void* raw = poolIter->second.GetRaw( entity ) )
+            return *static_cast<Component*>( raw );
+
+    throw std::runtime_error( std::format( "GetComponent: Entity {} doesn't have component {}", (size_t)entity, ComponentName<Component>() ) );
 }
 
 template <ComponentType Component>
@@ -203,9 +232,8 @@ const Component& Registry::GetComponent( Entity entity ) const
 template <ComponentType ...Components>
 std::tuple<Components&...> Registry::GetComponents( Entity entity )
 {
-    if ( !HasComponents<Components...>( entity ) )
-        throw std::runtime_error( std::format( "GetComponents: Entity {} doesn't have required components", (size_t)entity ) );
-
+    // Each GetComponent validates on its own; pre-checking here would double
+    // every lookup.
     return std::forward_as_tuple( GetComponent<Components>( entity )... );
 }
 
@@ -213,7 +241,7 @@ template <ComponentType Component>
 bool Registry::HasComponent( Entity entity ) const
 {
     if ( entity == INVALID_ENTITY )
-        throw std::runtime_error( "HasComponent: Invalid entity" );
+        throw std::runtime_error( std::format( "HasComponent<{}>: Invalid entity", ComponentName<Component>() ) );
 
     return EntityHasComponent( entity, Component::ID() );
 }
@@ -232,7 +260,7 @@ template <ComponentType Component>
 void Registry::RemoveComponent( Entity entity )
 {
     if ( entity == INVALID_ENTITY )
-        throw std::runtime_error( "RemoveComponent: Invalid entity" );
+        throw std::runtime_error( std::format( "RemoveComponent<{}>: Invalid entity", ComponentName<Component>() ) );
 
     //ComponentTypeId component = GetComponentTypeId<Component>();
     if ( EntityHasComponent( entity, Component::ID() ) )
@@ -270,18 +298,20 @@ void Registry::ForEachEntityComponentRaw( Entity entity, F&& func )
 template <ComponentType ...Components, typename F>
 void Registry::ForEach( F&& func ) const
 {
+    // func is invoked once per entity, so it must not be forwarded (moved) here.
     ForEachTuple<Components...>( [&func]( Entity entity, std::tuple<const Components&...> components )
     {
-        std::apply( std::forward<F>( func ), std::tuple_cat( std::make_tuple( entity ), components ) );
+        std::apply( func, std::tuple_cat( std::make_tuple( entity ), components ) );
     } );
 }
 
 template <ComponentType ...Components, typename F>
 void Registry::ForEach( F&& func )
 {
+    // func is invoked once per entity, so it must not be forwarded (moved) here.
     ForEachTuple<Components...>( [&func]( Entity entity, std::tuple<Components&...> components )
     {
-        std::apply( std::forward<F>( func ), std::tuple_cat( std::make_tuple( entity ), components ) );
+        std::apply( func, std::tuple_cat( std::make_tuple( entity ), components ) );
     } );
 }
 
@@ -301,6 +331,8 @@ void Registry::ForEachEntity( F&& func )
 template <ComponentType ...Components, typename F>
 void Registry::ForEachTuple( F&& func ) const
 {
+    // A component type nobody has registered yet simply has no entities, so the
+    // intersection is empty. That is a normal result, not an error.
     if ( !( mComponents.contains( Components::ID() ) && ... ) )
         return;
 
@@ -316,7 +348,7 @@ void Registry::ForEachTuple( F&& func ) const
     indicies.fill( 0u );
     while ( true )
     {
-        for ( int i = 0; i < size; i++ )
+        for ( size_t i = 0; i < size; i++ )
         {
             if ( indicies[i] >= pools[i]->Size() )
                 return;
@@ -326,14 +358,12 @@ void Registry::ForEachTuple( F&& func ) const
         }
 
         bool skip = false;
-        for ( int i = 0; i < size; i++ )
+        for ( size_t i = 0; i < size; i++ )
         {
-            while ( pools[i]->mEntities[indicies[i]].mId < maxId )
-            {
-                indicies[i]++;
-                if ( indicies[i] >= pools[i]->Size() )
-                    return;
-            }
+            indicies[i] = pools[i]->AdvanceTo( indicies[i], maxId );
+            if ( indicies[i] >= pools[i]->Size() )
+                return;
+
             if ( pools[i]->mEntities[indicies[i]].mId > maxId )
             {
                 skip = true;
@@ -345,7 +375,7 @@ void Registry::ForEachTuple( F&& func ) const
 
         func( Entity( maxId ), MakeTupleFromPoolsAndIndiciesConst<Components...>( pools, indicies, std::make_index_sequence<size>{} ) );
 
-        for ( int i = 0; i < size; i++ )
+        for ( size_t i = 0; i < size; i++ )
             indicies[i]++;
     }
 }
@@ -357,6 +387,11 @@ void Registry::RuntimeForEach( const std::array<ComponentTypeId, SIZE>& componen
     std::bitset<SIZE> validBS;
     for ( size_t i = 0; i < SIZE; i++ )
         validBS.set( i, componentIds[i] != INVALID_COMPONENT_TYPE_ID );
+
+    // With no valid component id there is nothing to intersect and nothing to
+    // advance, so the loop below would never terminate.
+    if ( validBS.none() )
+        return;
 
     // pools
     std::array<Pool*, SIZE> pools;
@@ -401,12 +436,10 @@ void Registry::RuntimeForEach( const std::array<ComponentTypeId, SIZE>& componen
             const auto& poolEntities = pool->mEntities;
             auto& entityIndex = indicies[i];
 
-            while ( poolEntities[entityIndex].mId < maxId )
-            {
-                entityIndex++;
-                if ( entityIndex >= pool->Size() )
-                    return;
-            }
+            entityIndex = pool->AdvanceTo( entityIndex, maxId );
+            if ( entityIndex >= pool->Size() )
+                return;
+
             if ( poolEntities[entityIndex].mId > maxId )
             {
                 skip = true;
@@ -430,8 +463,11 @@ void Registry::RuntimeForEach( const std::array<ComponentTypeId, SIZE>& componen
         // Call functor callback
         func( Entity( maxId ), components );
 
-        for ( int i = 0; i < componentIds.size(); i++ )
-            indicies[i]++;
+        for ( size_t i = 0; i < SIZE; i++ )
+        {
+            if ( validBS.test( i ) )
+                indicies[i]++;
+        }
     }
 }
 
@@ -451,20 +487,28 @@ void Registry::ForEachTuple( F&& func )
     );
 }
 
+
+// ------------------------ View ------------------------
+
 template <ComponentType ...Components>
 View<Components...> Registry::GetView()
 {
-    constexpr size_t N = sizeof...( Components );
-    std::array<ComponentTypeId, N> ids = { Components::ID()... };
-    std::array<Pool*, N> pools;
-    for ( size_t i = 0; i < N; i++ )
+    constexpr size_t size = sizeof...( Components );
+
+    std::array<Pool*, size> pools;
+    pools.fill( nullptr );
+
+    const auto componentTypes = GetComponentsTypeId<Components...>();
+    for ( size_t i = 0; i < size; i++ )
     {
-        auto it = mPools.find( ids[i] );
-        if ( it == mPools.end() )
-            return View<Components...>();
-        pools[i] = &it->second;
+        const auto iter = mPools.find( componentTypes[i] );
+        if ( iter != mPools.end() )
+            pools[i] = &iter->second;
     }
+
+    // A null pool leaves the view empty - see View::Iterator's constructor.
     return View<Components...>( pools );
 }
+
 
 }
